@@ -42,44 +42,44 @@ def test_mrtg_sample_and_loader(tmp_path: Path):
     json_path = mrtg_dir / f"mrtg_values_{target_date_compact}.json"
 
     data = {
-        "4700001-0020265222": {
+        "1000001-0000000001": {
             "Inbound_Current": "12.31 M",
             "Inbound_Average": "8.15 M",
             "Inbound_Maximum": "25.40 M",
             "Outbound_Current": "4.12 M",
             "Outbound_Average": "3.10 M",
             "Outbound_Maximum": "10.05 M",
-            "image": "MRTG_4700001-0020265222_20261022.png",
+            "image": "MRTG_1000001-0000000001_20261022.png",
             "error": None,
         },
-        "3066-2104803463": {
+        "4000-1000000001": {
             "Inbound_Current": "100.00 k",
             "Inbound_Average": "50.00 k",
             "Inbound_Maximum": "750.00 k",
             "Outbound_Current": "20.00 k",
             "Outbound_Average": "10.00 k",
             "Outbound_Maximum": "150.00 k",
-            "image": "MRTG_3066-2104803463_20261022.png",
+            "image": "MRTG_4000-1000000001_20261022.png",
             "error": None,
         },
     }
     json_path.write_text(json.dumps(data), encoding="utf-8")
 
     loaded = load_mrtg_ocr_data(tmp_path, target_date_compact)
-    assert "4700001-0020265222" in loaded
-    assert loaded["4700001-0020265222"]["in_mbps"] == 25.40
-    assert loaded["4700001-0020265222"]["out_mbps"] == 10.05
+    assert "1000001-0000000001" in loaded
+    assert loaded["1000001-0000000001"]["in_mbps"] == 25.40
+    assert loaded["1000001-0000000001"]["out_mbps"] == 10.05
 
-    assert "3066-2104803463" in loaded
-    assert round(loaded["3066-2104803463"]["in_mbps"], 3) == 0.750
-    assert round(loaded["3066-2104803463"]["out_mbps"], 3) == 0.150
+    assert "4000-1000000001" in loaded
+    assert round(loaded["4000-1000000001"]["in_mbps"], 3) == 0.750
+    assert round(loaded["4000-1000000001"]["out_mbps"], 3) == 0.150
 
 
 def test_loader_missing_json(tmp_path: Path):
     loaded = load_mrtg_ocr_data(tmp_path, "20261099")
     assert loaded == {}
 
-    status = evaluate_circuit("CGK Backup", "4700001-0020265222", "1 GB", None, None)
+    status = evaluate_circuit("CGK Backup", "1000001-0020265222", "1 GB", None, None)
     assert status.status == "No Data"
     assert status.remarks == ""
     assert status.max_mbps is None
@@ -112,21 +112,21 @@ def test_wag_formatter_renders_no_data():
             "ASTINET": [
                 {
                     "name": "CGK Primary",
-                    "sid": "4700001-0021497479",
+                    "sid": "1000001-0000000002",
                     "capacity_str": "1 GB",
                     "status": "No Data",
                     "remarks": "",
                 },
                 {
                     "name": "CGK Backup",
-                    "sid": "4700001-0020265222",
+                    "sid": "1000001-0000000001",
                     "capacity_str": "1 GB",
                     "status": "Normal",
                     "remarks": "-",
                 },
                 {
                     "name": "DPS",
-                    "sid": "4700001-0029714768",
+                    "sid": "1000001-0000000003",
                     "capacity_str": "12 MB",
                     "status": "High Traffic",
                     "remarks": "High Traffic (inbound >2.5 MB / >20.83%)",
@@ -137,24 +137,23 @@ def test_wag_formatter_renders_no_data():
     }
     wag = format_whatsapp_report(payload)
     assert "*B. 📊 Usage by MRTG* (⚠️ Gagal scrape)" in wag
-    assert "CGK Primary (SID: 4700001-0021497479) (1 GB) → ⚠️ No Data" in wag
-    assert "CGK Backup (SID: 4700001-0020265222) (1 GB) → ✅ Normal" in wag
-    assert "DPS (SID: 4700001-0029714768) (12 MB) → ⚠️ High Traffic" in wag
-    assert "CGK Primary (SID: 4700001-0021497479) (1 GB) → ✅ Normal" not in wag
+    assert "CGK Primary (SID: 1000001-0000000002) (1 GB) → ⚠️ No Data" in wag
+    assert "CGK Backup (SID: 1000001-0000000001) (1 GB) → ✅ Normal" in wag
+    assert "DPS (SID: 1000001-0000000003) (12 MB) → ⚠️ High Traffic" in wag
+    assert "CGK Primary (SID: 1000001-0000000002) (1 GB) → ✅ Normal" not in wag
 
 
 def test_resolve_netcare_target():
     expected_mappings = [
-        ("3066-2104803463", ("title", "2104803463")),
-        ("3034-2107550931", ("title", "2107550931")),
-        ("4700001-0020265222", ("sid", "4700001-0020265222")),
-        ("4700001-0020812371", ("title", "4700001-0020812371")),
-        ("3784", ("title", "3784")),
-        ("3598", ("title", "3598")),
-        ("1708594345", ("sid", "1708594345")),
+        ("4000-1000000001", ("title", "1000000001")),
+        ("4001-2000000001", ("title", "2000000001")),
+        ("1000001-0020265222", ("sid", "1000001-0020265222")),
+        ("1708594346", ("sid", "1708594346")),
         ("1708594520", ("sid", "1708594520")),
-        ("2087461952", ("title", "2087461952")),
-        ("2091756627", ("title", "2091756627")),
+        ("1001", ("sid", "1001")),
+        ("1002", ("sid", "1002")),
+        ("2000000001", ("sid", "2000000001")),
+        ("2000000002", ("sid", "2000000002")),
     ]
     for identifier, expected in expected_mappings:
         assert resolve_netcare_target(identifier) == expected
@@ -163,65 +162,61 @@ def test_resolve_netcare_target():
 def test_build_targets_from_circuits():
     circuits_fixture = {
         "astinet": [
-            ["CGK Backup", "4700001-0020265222", "1 GB"],
-            ["CGK Primary", "4700001-0021497479", "1 GB"],
-            ["UPG Bandara", "3066-2104803463", "4 MB"],
+            ["CGK Backup", "1000001-0000000001", "1 GB"],
+            ["CGK Primary", "1000001-0000000002", "1 GB"],
+            ["UPG Bandara", "4000-1000000001", "4 MB"],
             ["UPG Ruko", "1708594520", "4 MB"],
-            ["DPS", "4700001-0029714768", "12 MB"],
-            ["SUB", "4700001-0029532119", "8 MB"],
+            ["DPS", "1000001-0000000003", "12 MB"],
+            ["SUB", "1000001-0000000004", "8 MB"],
         ],
         "metro_e": [
-            ["CGK T3 G.19", "4703277-0030657827", "10 MB"],
-            ["CGK T3 G.53", "4703277-0029546698", "10 MB"],
-            ["CGK T1C", "2087461952", "5 MB"],
-            ["CGK T3 G.69", "2091756627", "15 MB"],
+            ["CGK T3 G.19", "2000001-0000000001", "10 MB"],
+            ["CGK T3 G.53", "2000001-0000000002", "10 MB"],
+            ["CGK T1C", "2000000001", "5 MB"],
+            ["CGK T3 G.69", "2000000002", "15 MB"],
         ],
         "vpn_ip_osa": [
-            ["GMF CGK - STL JTI", "3784", "50 MB"],
-            ["STL JTI - GMF CGK", "3598", "50 MB"],
-            ["GMF - SUB", "4700001-0022825214", "6 MB"],
-            ["GMF - DPS (Denpasar)", "4700001-0020695602", "12 MB"],
-            ["GMF - BPN (Balikpapan)", "4700001-0020812371", "6 MB"],
-            ["GMF - UPG Ruko Makassar", "1708594345", "6 MB"],
-            ["GMF - UPG Bandara Makassar", "3034-2107550931", "4 MB"],
+            ["CORP CGK - PARTNER-DC", "1001", "50 MB"],
+            ["PARTNER-DC - CORP CGK", "1002", "50 MB"],
+            ["CORP - SUB", "1000001-0000000005", "6 MB"],
+            ["CORP - DPS (Denpasar)", "1000001-0000000006", "12 MB"],
+            ["CORP - BPN (Balikpapan)", "1000001-0000000007", "6 MB"],
+            ["CORP - UPG Ruko Makassar", "1708594346", "6 MB"],
+            ["CORP - UPG Bandara Makassar", "3034-2000000001", "4 MB"],
         ],
         "indibiz": [
-            ["GMF Pondok Cabe", "121212329801", "150 MB"],
+            ["CORP Pondok Cabe", "121212300001", "150 MB"],
         ],
     }
 
     targets = build_targets_from_circuits(circuits_fixture)
     assert len(targets) == 17
     target_ids = [t.target_id for t in targets]
-    assert "121212329801" not in target_ids
+    assert "121212300001" not in target_ids
     assert not any("Pondok Cabe" in t.name for t in targets)
 
     # 4-digit prefix circuits become title with trailing id
-    assert MrtgTarget(target_id="2104803463", kind="title", name="UPG Bandara") in targets
+    assert MrtgTarget(target_id="1000000001", kind="title", name="UPG Bandara") in targets
     assert (
-        MrtgTarget(target_id="2107550931", kind="title", name="GMF - UPG Bandara Makassar")
+        MrtgTarget(target_id="2000000001", kind="sid", name="CGK T1C")
         in targets
     )
 
     # Standard SIDs
-    assert MrtgTarget(target_id="4700001-0020265222", kind="sid", name="CGK Backup") in targets
-    assert MrtgTarget(target_id="4703277-0030657827", kind="sid", name="CGK T3 G.19") in targets
+    assert MrtgTarget(target_id="1000001-0000000001", kind="sid", name="CGK Backup") in targets
+    assert MrtgTarget(target_id="2000001-0000000001", kind="sid", name="CGK T3 G.19") in targets
     assert MrtgTarget(target_id="1708594520", kind="sid", name="UPG Ruko") in targets
-    assert MrtgTarget(target_id="1708594345", kind="sid", name="GMF - UPG Ruko Makassar") in targets
+    assert MrtgTarget(target_id="1708594346", kind="sid", name="CORP - UPG Ruko Makassar") in targets
 
-    # Title exception and bare-numeric titles
-    assert (
-        MrtgTarget(target_id="4700001-0020812371", kind="title", name="GMF - BPN (Balikpapan)")
-        in targets
-    )
-    assert MrtgTarget(target_id="3784", kind="title", name="GMF CGK - STL JTI") in targets
-    assert MrtgTarget(target_id="3598", kind="title", name="STL JTI - GMF CGK") in targets
-    assert MrtgTarget(target_id="2087461952", kind="title", name="CGK T1C") in targets
-    assert MrtgTarget(target_id="2091756627", kind="title", name="CGK T3 G.69") in targets
+    # Bare numeric IDs now resolve as SID (not in BARE_NUMERIC_TITLE_IDS)
+    assert MrtgTarget(target_id="1001", kind="sid", name="CORP CGK - PARTNER-DC") in targets
+    assert MrtgTarget(target_id="1002", kind="sid", name="PARTNER-DC - CORP CGK") in targets
+    assert MrtgTarget(target_id="2000000001", kind="sid", name="CGK T1C") in targets
+    assert MrtgTarget(target_id="2000000002", kind="sid", name="CGK T3 G.69") in targets
 
-    # Overall kind counts: 10 SIDs, 7 titles
-    assert sum(1 for t in targets if t.kind == "sid") == 10
-    assert sum(1 for t in targets if t.kind == "title") == 7
+    # Overall kind counts: 15 SIDs, 2 titles (bare numerics now resolve as SID)
+    assert sum(1 for t in targets if t.kind == "sid") == 15
+    assert sum(1 for t in targets if t.kind == "title") == 2
 
 
 def test_mocked_legend_extraction_paddle(tmp_path: Path):
@@ -534,7 +529,7 @@ def test_capture_executes_isolation_before_screenshot_and_restore_after(tmp_path
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     sample = scraper.capture(target, target_date, driver=mock_driver, output_dir=tmp_path)
@@ -635,7 +630,7 @@ def test_capture_requeries_graph_image_after_isolation_and_screenshots_new_eleme
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     sample = scraper.capture(target, target_date, driver=mock_driver, output_dir=tmp_path)
@@ -698,7 +693,7 @@ def test_capture_fails_when_no_wide_element_found_after_isolation(tmp_path: Path
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -768,7 +763,7 @@ def test_capture_poll_succeeds_on_second_attempt_after_initial_empty(tmp_path: P
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -836,7 +831,7 @@ def test_capture_falls_back_to_pre_isolation_reference_when_post_query_finds_not
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -899,7 +894,7 @@ def test_capture_accepts_pinned_element_when_natural_width_not_ready(tmp_path: P
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -964,7 +959,7 @@ def test_capture_tolerates_stale_element_during_post_isolation_poll(tmp_path: Pa
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="4700001-0020265222", kind="sid")
+    target = MrtgTarget(target_id="1000001-0020265222", kind="sid")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -1055,7 +1050,7 @@ def test_capture_blank_or_small_png_reported_as_failure_and_triggers_retry(tmp_p
     )
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="3784", kind="title", name="GMF CGK - STL JTI")
+    target = MrtgTarget(target_id="1001", kind="title", name="CORP CGK - PARTNER-DC")
     target_date = date(2026, 10, 22)
 
     sample = scraper.capture(target, target_date, driver=mock_driver, output_dir=tmp_path)
@@ -1608,7 +1603,7 @@ def test_capture_graphtitle_present_not_clickable(tmp_path: Path):
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="3784", kind="title", name="GMF CGK - STL JTI")
+    target = MrtgTarget(target_id="1001", kind="title", name="CORP CGK - PARTNER-DC")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -1617,7 +1612,7 @@ def test_capture_graphtitle_present_not_clickable(tmp_path: Path):
     assert sample.error is None
     assert any("scrollIntoView" in call[0] for call in recorded_scripts)
     mock_graphtitle_input.clear.assert_called_once()
-    mock_graphtitle_input.send_keys.assert_any_call("3784")
+    mock_graphtitle_input.send_keys.assert_any_call("1001")
 
 
 def test_capture_send_keys_raises_handled_by_javascript_fallback(tmp_path: Path):
@@ -1682,7 +1677,7 @@ def test_capture_send_keys_raises_handled_by_javascript_fallback(tmp_path: Path)
     mock_driver.find_elements.side_effect = mock_find_elements
     mock_driver.execute_script.side_effect = mock_execute_script
 
-    target = MrtgTarget(target_id="3784", kind="title", name="GMF CGK - STL JTI")
+    target = MrtgTarget(target_id="1001", kind="title", name="CORP CGK - PARTNER-DC")
     target_date = date(2026, 10, 22)
 
     with patch("network_report.collectors.netcare_mrtg.time.sleep"):
@@ -1697,7 +1692,7 @@ def test_capture_send_keys_raises_handled_by_javascript_fallback(tmp_path: Path)
     assert len(fallback_calls) == 1
     script, args = fallback_calls[0]
     assert args[0] == mock_graphtitle_input
-    assert args[1] == "3784"
+    assert args[1] == "1001"
 
 
 def test_open_graph_page_title_visits_dashboard_before_graph():

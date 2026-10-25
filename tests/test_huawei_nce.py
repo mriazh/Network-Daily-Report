@@ -61,9 +61,9 @@ def test_parse_ssid_info_real_format(tmp_path: Path):
     ssid_csv = tmp_path / "ssidInfo.csv"
     content = (
         '\t"SSID"\t,"User Quantity"\n'
-        '"GMF-Employee",100\n'
-        '"GMF-Guest",25\n'
-        '"GMF-IoT",10\n'
+        '"CORP-Employee",100\n'
+        '"CORP-Guest",25\n'
+        '"CORP-IoT",10\n'
         '"VIP-Executive",5\n'
     )
     ssid_csv.write_text(content, encoding="utf-8-sig")
@@ -114,7 +114,7 @@ def test_wag_formatter_filters_wlc_and_renders_wac():
         "cpu": [("WLC-Aruba-01", 85.0), ("SW-CORE-01", 42.5)],
         "memory": [("WLC-Aruba-02", 78.0), ("SW-DIST-01", 52.0)],
         "wac": {
-            "device_name": "WAC-1-GMF",
+            "device_name": "WAC-1-CORE",
             "cpu_pct": 20.0,
             "mem_pct": 57.0,
             "temperature": "42 C",
@@ -133,7 +133,7 @@ def test_wag_formatter_filters_wlc_and_renders_wac():
 
     # WAC subsection rendered
     assert "5. 🎛️ WAC Huawei (Live)" in msg
-    assert "Device Name → WAC-1-GMF" in msg
+    assert "Device Name → WAC-1-CORE" in msg
     assert "CPU Utilization → 20.00%" in msg
     assert "Memory Usage → 57.00%" in msg
     assert "Temperature → 42 C" in msg
@@ -183,7 +183,7 @@ def test_excel_writer_wac_and_no_wlc(tmp_path: Path):
         "cpu": [("WLC-Aruba", 88.0), ("SW-CORE", 35.0)],
         "memory": [("WLC-Aruba", 92.0), ("SW-DIST", 45.0)],
         "wac": {
-            "device_name": "WAC-1-GMF",
+            "device_name": "WAC-1-CORE",
             "cpu_pct": 22.0,
             "mem_pct": 58.0,
             "temperature": "40 C",
@@ -208,7 +208,7 @@ def test_excel_writer_wac_and_no_wlc(tmp_path: Path):
 
     # WAC in col J (10), rows 114-119
     assert res_ws.cell(row=114, column=10).value == "Huawei WAC Status (Live)"
-    assert res_ws.cell(row=115, column=10).value == "Device: WAC-1-GMF"
+    assert res_ws.cell(row=115, column=10).value == "Device: WAC-1-CORE"
     assert res_ws.cell(row=116, column=10).value == "CPU: 22.00%"
     assert res_ws.cell(row=117, column=10).value == "Memory: 58.00%"
     assert res_ws.cell(row=118, column=10).value == "Temp: 40 C"
@@ -246,7 +246,7 @@ def test_nce_collector_mock_playwright(tmp_path: Path):
         text_map = {
             "#cpuUsageCurrentValue": "Current / 25%",
             "#memeryUsageCurrentValue": "Current / 57%",
-            "#deviceInfo_deviceName": "WAC-1-GMF",
+            "#deviceInfo_deviceName": "WAC-1-CORE",
             "#deviceInfo_deviceType": "AC6508",
             "#deviceInfo_temperature": "42 C",
             "#deviceInfo_runningTime": "120 days",
@@ -278,7 +278,7 @@ def test_nce_collector_mock_playwright(tmp_path: Path):
         assert isinstance(export.wac, WacStatus)
         assert export.wac.cpu_pct == 25.0
         assert export.wac.mem_pct == 57.0
-        assert export.wac.device_name == "WAC-1-GMF"
+        assert export.wac.device_name == "WAC-1-CORE"
         assert export.wac.device_type == "AC6508"
 
         # Check saved wac_status.json
@@ -286,4 +286,4 @@ def test_nce_collector_mock_playwright(tmp_path: Path):
         assert wac_json.exists()
         saved_dict = json.loads(wac_json.read_text(encoding="utf-8"))
         assert saved_dict["cpu_pct"] == 25.0
-        assert saved_dict["device_name"] == "WAC-1-GMF"
+        assert saved_dict["device_name"] == "WAC-1-CORE"

@@ -101,7 +101,7 @@ def _load_circuits():
 
 HOTSPOT_LINKS = [x[0] for x in ASTINET_CIRCUITS if "DPS" in x[0] or "SUB" in x[0]] + \
                 [x[0] for x in METRO_E if "T1C" in x[0]] + \
-                [x[0] for x in VPN_IP_OSA if "BPN" in x[0]]
+                [x[0] for x in VPN_IP_OSA if "CORE" in x[0]]
 
 # --- helpers -----------------------------------------------------------------
 def solid(color: str) -> PatternFill:

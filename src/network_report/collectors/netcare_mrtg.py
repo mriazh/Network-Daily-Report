@@ -254,9 +254,9 @@ class MrtgSample:
 
 # The TelkomCare portal uses either SID or graphtitle lookup per circuit.
 # The lookup field is a portal-side property that cannot be inferred purely from
-# the identifier shape for bare-numeric identifiers, so the bare-numeric title cases
-# are pinned explicitly.
-BARE_NUMERIC_TITLE_IDS: frozenset[str] = frozenset({"3784", "3598", "2087461952", "2091756627"})
+# the identifier shape for bare-numeric identifiers.
+# No hardcoded title IDs; lookup is inferred from identifier pattern.
+BARE_NUMERIC_TITLE_IDS: frozenset[str] = frozenset()
 TITLE_CIRCUIT_IDS = BARE_NUMERIC_TITLE_IDS
 
 _FOUR_TEN_PATTERN = re.compile(r"^\d{4}-\d{10}$")
@@ -265,8 +265,6 @@ _SID_PATTERN = re.compile(r"^(\d{4}-\d{6}-\d{6}|\d{7}-\d{10})$")
 
 def resolve_netcare_target(identifier: str) -> tuple[str, str]:
     clean_id = identifier.strip()
-    if clean_id == "4700001-0020812371":
-        return ("title", clean_id)
     if _FOUR_TEN_PATTERN.match(clean_id):
         return ("title", clean_id.split("-", 1)[1])
     if _SID_PATTERN.match(clean_id):
@@ -630,7 +628,7 @@ class LegendExtractor:
 class NetcareScraper:
     def __init__(
         self,
-        base_url: str = "https://telkomcare.telkom.co.id",
+        base_url: str = "https://telkomcare.example.internal",
         username: str = "",
         password: str = "",
         totp_secret: str = "",

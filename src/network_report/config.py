@@ -144,7 +144,7 @@ class RouterOSSettings(BaseModel):
 
 class NetcareSettings(BaseModel):
     enabled: bool = Field(default=True)
-    base_url: str = Field(default="https://telkomcare.telkom.co.id")
+    base_url: str = Field(default="https://telkomcare.example.internal")
     username: str = Field(default="")
     password: str = Field(default="")
     totp_secret: str = Field(default="")
@@ -347,7 +347,7 @@ def load_config() -> AppConfig:
     netcare_set = NetcareSettings(
         enabled=os.getenv("NETCARE_ENABLED", "true").lower() in ("true", "1", "yes"),
         base_url=os.getenv("TELKOMCARE_GRAPH_URL")
-        or os.getenv("TELKOMCARE_BASE_URL", "https://telkomcare.telkom.co.id"),
+        or os.getenv("TELKOMCARE_BASE_URL", "https://telkomcare.example.internal"),
         username=os.getenv("TELKOMCARE_USERNAME") or os.getenv("NETCARE_USER_LEGACY", ""),
         password=os.getenv("TELKOMCARE_PASSWORD") or os.getenv("NETCARE_PASSWORD_LEGACY", ""),
         totp_secret=os.getenv("TOTP_SECRET", ""),

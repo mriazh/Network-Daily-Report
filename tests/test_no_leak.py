@@ -26,6 +26,20 @@ SECRET_SUFFIXES = (
 IP_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 ASSIGN_REGEX = re.compile(r"^\s*(?:export\s+)?([A-Za-z0-9_]+)\s*[:=]\s*(.*)$")
 
+# Telkom CSIRT sanitization patterns
+TELKOM_SID_PATTERNS = (
+    r"4700001-\d{10}",           # Standard SID format
+    r"4703277-\d{10}",           # Metro-E SID format
+    r"3066-2104803463",          # Specific real SID
+    r"1708594[35]45",            # 1708594345, 1708594520
+    r"2087461952",               # Bare numeric title ID
+    r"2091756627",               # Bare numeric title ID
+    r"121212329801",             # Indibiz SID
+)
+TELKOM_SID_REGEX = re.compile("|".join(TELKOM_SID_PATTERNS))
+TELKOMCARE_DOMAIN_REGEX = re.compile(r"telkomcare\.telkom\.co\.id", re.IGNORECASE)
+GMF_REGEX = re.compile(r"\bGMF\b", re.IGNORECASE)
+
 
 def _get_tracked_files(repo_root: Path) -> list[Path]:
     try:
@@ -169,3 +183,84 @@ def test_no_csirt_pattern():
                 )
 
     assert not leaks, "Found forbidden pattern leaks:\n" + "\n".join(leaks)
+
+
+def test_no_telkom_sid_leaks():
+    """Ensure no real Telkom SIDs leak into tracked files."""
+    repo_root = Path(__file__).resolve().parents[1]
+    this_file = Path(__file__).resolve()
+    leaks = []
+
+    for file_path in _get_tracked_files(repo_root):
+        if file_path.resolve() == this_file:
+            continue
+        if _is_skipped(file_path, repo_root):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        rel_path = str(file_path.relative_to(repo_root)).replace("\\", "/")
+
+        for line_no, line in enumerate(content.splitlines(), 1):
+            if TELKOM_SID_REGEX.search(line):
+                leaks.append(
+                    f"{rel_path}:{line_no} contains real Telkom SID: {line.strip()}"
+                )
+
+    assert not leaks, "Found real Telkom SID leaks:\n" + "\n".join(leaks)
+
+
+def test_no_telkomcare_domain_leaks():
+    """Ensure telkomcare.telkom.co.id does not appear in tracked files."""
+    repo_root = Path(__file__).resolve().parents[1]
+    this_file = Path(__file__).resolve()
+    leaks = []
+
+    for file_path in _get_tracked_files(repo_root):
+        if file_path.resolve() == this_file:
+            continue
+        if _is_skipped(file_path, repo_root):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        rel_path = str(file_path.relative_to(repo_root)).replace("\\", "/")
+
+        for line_no, line in enumerate(content.splitlines(), 1):
+            if TELKOMCARE_DOMAIN_REGEX.search(line):
+                leaks.append(
+                    f"{rel_path}:{line_no} contains telkomcare.telkom.co.id: {line.strip()}"
+                )
+
+    assert not leaks, "Found telkomcare.telkom.co.id leaks:\n" + "\n".join(leaks)
+
+
+def test_no_gmf_keyword_leaks():
+    """Ensure GMF keyword does not appear in tracked files."""
+    repo_root = Path(__file__).resolve().parents[1]
+    this_file = Path(__file__).resolve()
+    leaks = []
+
+    for file_path in _get_tracked_files(repo_root):
+        if file_path.resolve() == this_file:
+            continue
+        if _is_skipped(file_path, repo_root):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        rel_path = str(file_path.relative_to(repo_root)).replace("\\", "/")
+
+        for line_no, line in enumerate(content.splitlines(), 1):
+            if GMF_REGEX.search(line):
+                leaks.append(
+                    f"{rel_path}:{line_no} contains GMF keyword: {line.strip()}"
+                )
+
+    assert not leaks, "Found GMF keyword leaks:\n" + "\n".join(leaks)
