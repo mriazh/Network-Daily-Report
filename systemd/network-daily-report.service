@@ -1,0 +1,13 @@
+[Unit]
+Description=Network Daily Report Generator
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/mriazh/Github-PC/Network-Daily-Report
+EnvironmentFile=/home/mriazh/Github-PC/Network-Daily-Report/config/.env
+ExecStart=/home/mriazh/Github-PC/Network-Daily-Report/.venv/bin/python -m network_report.cli run --date today --send-wa
+Environment=TZ=Asia/Jakarta
+
+[Install]
+WantedBy=multi-user.target

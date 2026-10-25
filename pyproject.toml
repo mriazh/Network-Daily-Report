@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "network-daily-report"
+version = "0.1.0"
+description = "24/7 automated network daily report system on Debian: collectors, aggregators, Excel report generator, and GOWA WhatsApp notifier"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1.2",
+    "requests>=2.31.0",
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "routeros_api>=0.21.0",
+    "pyotp>=2.10.0",
+    "selenium>=4.15.0",
+]
+
+[project.optional-dependencies]
+browser = [
+    "playwright>=1.40.0",
+]
+# Dashboard screenshot image handling (cropping for PaddleOCR, Gemini Vision fallback)
+ocr = [
+    "pillow>=10.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+network-report = "network_report.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [
+    ".git",
+    ".venv*",
+    "__pycache__",
+    "output",
+    "data",
+    "docs",
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

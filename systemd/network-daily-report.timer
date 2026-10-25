@@ -1,0 +1,12 @@
+[Unit]
+Description=Run 24/7 Network Daily Report Automation daily at 22:00 WIB
+Requires=network-daily-report.service
+
+[Timer]
+OnCalendar=*-*-* 22:00:00
+Timezone=Asia/Jakarta
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

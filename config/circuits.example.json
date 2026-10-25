@@ -1,0 +1,82 @@
+{
+  "pic_names": [
+    "Staff Engineer 1",
+    "Staff Engineer 2",
+    "Staff Engineer 3",
+    "Staff Engineer 4",
+    "Staff Engineer 5"
+  ],
+  "astinet": [
+    ["Internet Link Backup", "SID-AST-0001", "100 Mbps"],
+    ["Internet Link Primary", "SID-AST-0002", "100 Mbps"],
+    ["Branch Office Alpha", "SID-AST-0003", "20 Mbps"],
+    ["Branch Office Bravo", "SID-AST-0004", "20 Mbps"],
+    ["Branch Office Charlie", "SID-AST-0005", "20 Mbps"],
+    ["Branch Office Delta", "SID-AST-0006", "27 Mbps"]
+  ],
+  "metro_e": [
+    ["Metro-E Node Alpha", "SID-MTR-0001", "50 Mbps"],
+    ["Metro-E Node Bravo", "SID-MTR-0002", "50 Mbps"],
+    ["Metro-E Node Charlie", "SID-MTR-0003", "20 Mbps"],
+    ["Metro-E Node Delta", "SID-MTR-0004", "50 Mbps"]
+  ],
+  "vpn_ip_osa": [
+    ["Core Link HQ - DC A", "SID-VPN-0001", "100 Mbps"],
+    ["Core Link DC A - HQ", "SID-VPN-0002", "100 Mbps"],
+    ["VPN Branch Alpha", "SID-VPN-0003", "15 Mbps"],
+    ["VPN Branch Charlie", "SID-VPN-0004", "20 Mbps"],
+    ["VPN Branch Delta", "SID-VPN-0005", "15 Mbps"],
+    ["VPN Branch Echo", "SID-VPN-0006", "15 Mbps"],
+    ["VPN Branch Foxtrot", "SID-VPN-0007", "20 Mbps"]
+  ],
+  "indibiz": [
+    ["Internet Backup Remote", "SID-IND-0001", "100 Mbps"]
+  ],
+  "nexthop": [
+    ["Private Cloud Gateway", "10.10.1.1"],
+    ["VPN Hub Gateway", "10.10.1.2"],
+    ["Upstream Provider Router", "10.10.2.1"],
+    ["Cellular IoT Gateway", "10.10.2.2"],
+    ["Metro Backbone Core", "10.10.3.1"],
+    ["Partner B2B Gateway", "10.10.3.2"],
+    ["Cloud Transit Hub", "10.10.4.1"]
+  ],
+  "ssids": [
+    "IoT-Sensors",
+    "Executive-VIP",
+    "Customer-Access",
+    "Corporate-Staff",
+    "Partner-Corporate",
+    "Guest-Access",
+    "Corporate-Mobile",
+    "Staging-Quarantine"
+  ],
+  "modems": [
+    ["Modem Command Post", ["Package Standard"]],
+    ["Modem Meeting Room Alpha", ["Package Standard"]],
+    ["Modem Operations Center", ["Package Standard"]],
+    ["Modem Conference Hall", ["Package Standard"]],
+    ["Modem Executive Lounge", ["Package Standard"]],
+    ["Modem Backup Pool 1", ["Package Multi-1", "Package Multi-2", "Package Multi-3"]],
+    ["Modem Backup Pool 2", ["Package Multi-1", "Package Multi-2", "Package Multi-3"]],
+    ["Modem Backup Pool 3", ["Package Multi-1", "Package Multi-2", "Package Multi-3"]],
+    ["Modem Backup Pool 4", ["Package Multi-1", "Package Multi-2", "Package Multi-3"]],
+    ["Modem Customer Lounge", ["Package Tier-1", "Package Tier-2"]],
+    ["Portable MiFi Unit 01", ["Package Mobile"]],
+    ["Portable MiFi Unit 02", ["Package Mobile"]]
+  ],
+  "orbit_targets": [
+    {"no": 1, "name": "Modem Command Post", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Command Post Alpha", "ssid": "Modem Command Post"},
+    {"no": 2, "name": "Modem Meeting Room Alpha", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Meeting Room Alpha", "ssid": "tselhome-XXXX"},
+    {"no": 3, "name": "Modem Operations Center", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Operations Center", "ssid": "tselhome-XXXX"},
+    {"no": 4, "name": "Modem Conference Hall", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Conference Hall", "ssid": "tselhome-XXXX"},
+    {"no": 5, "name": "Modem Executive Lounge", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Executive Lounge", "ssid": "tselhome-XXXX"},
+    {"no": 6, "name": "Modem Backup Pool", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Backup Pool", "ssid": "tselhome-XXXX"},
+    {"no": 7, "name": "Modem Backup Pool", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Backup Pool", "ssid": "tselhome-XXXX"},
+    {"no": 8, "name": "Modem Backup Pool", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Backup Pool", "ssid": "tselhome-XXXX"},
+    {"no": 9, "name": "Modem Backup Pool", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Backup Pool", "ssid": "tselhome-XXXX"},
+    {"no": 10, "name": "Modem Customer Lounge", "phone": "0812XXXXXXXX", "imei": "864XXXXXXXXXXXX", "location": "Customer Lounge", "ssid": "Modem Customer Lounge"},
+    {"no": 11, "name": "Portable MiFi Unit 01", "phone": "0812XXXXXXXX", "imei": "359XXXXXXXXXXXX", "location": "Portable", "ssid": "MXX_XXXX"},
+    {"no": 12, "name": "Portable MiFi Unit 02", "phone": "0812XXXXXXXX", "imei": "359XXXXXXXXXXXX", "location": "Portable", "ssid": "MXX_XXXX"}
+  ]
+}
