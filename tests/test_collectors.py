@@ -314,7 +314,7 @@ def test_wag_nexthop_ping_omits_avg_when_missing():
 
 def test_wag_orbit_lists_all_twelve_modems_with_no_package_marker():
     orbit = [
-        {"location": f"Modem {i}", "packages": [{"remaining_gb": 10.5, "total_gb": 30.0}]}
+        {"location": f"Modem {i}", "packages": [{"remaining_gb": 10.5, "total_gb": 30.0, "expiry_str": "30 Oct 2026"}]}
         for i in range(1, 11)
     ]
     orbit.append({"location": "Modem 11", "packages": []})
@@ -322,7 +322,7 @@ def test_wag_orbit_lists_all_twelve_modems_with_no_package_marker():
 
     msg = format_whatsapp_report({"orbit": orbit})
     assert "*E. 📱 Modem Orbit*" in msg
-    assert msg.count("Kuota: 10.5 GB / 30.0 GB") == 10
+    assert msg.count("Kuota: 10.5 GB / 30.0 GB (Exp: 30 Oct 2026)") == 10
     assert msg.count("Kuota: - (No Active Package)") == 2
     assert "11. Modem 11: Kuota: - (No Active Package)" in msg
     assert "12. Modem 12: Kuota: - (No Active Package)" in msg

@@ -99,27 +99,32 @@ def _build_mrtg_payload(
         )
     mrtg_payload["Metro-E"] = metro_list
 
-    # VPN IP
-    vpn_list = []
+    # VPN IP - Split into JTI and OSA
+    vpn_jti_list = []
+    vpn_osa_list = []
     for name, sid, cap in circuits.get("vpn_ip_osa", []):
         d = _find_ocr(sid)
         max_in = d.get("in_mbps") if d else None
         max_out = d.get("out_mbps") if d else None
         status = evaluate_circuit(name, sid, cap, max_in, max_out)
-        vpn_list.append(
-            {
-                "name": name,
-                "sid": sid,
-                "capacity_str": cap,
-                "status": status.status,
-                "utilization_pct": status.utilization_pct,
-                "over_pct": status.over_pct,
-                "capacity_mbps": status.capacity_mbps,
-                "max_mbps": status.max_mbps,
-                "remarks": status.remarks,
-            }
-        )
-    mrtg_payload["VPN IP"] = vpn_list
+        link_item = {
+            "name": name,
+            "sid": sid,
+            "capacity_str": cap,
+            "status": status.status,
+            "utilization_pct": status.utilization_pct,
+            "over_pct": status.over_pct,
+            "capacity_mbps": status.capacity_mbps,
+            "max_mbps": status.max_mbps,
+            "remarks": status.remarks,
+        }
+        # JTI links are the core links to PARTNER-DC (STL/JTI)
+        if "PARTNER-DC" in name.upper() or "STL" in name.upper() or "JTI" in name.upper():
+            vpn_jti_list.append(link_item)
+        else:
+            vpn_osa_list.append(link_item)
+    mrtg_payload["VPN IP (JTI)"] = vpn_jti_list
+    mrtg_payload["VPN IP (OSA)"] = vpn_osa_list
 
     # Indibiz - Native local store first, fallback to Netcare OCR
     indibiz_list = []
@@ -653,6 +658,13 @@ def run_daily_pipeline(
                 "outdoor_fault": huawei_ap_data.outdoor_fault if huawei_ap_data else 0,
                 "fault_names": huawei_ap_data.fault_ap_names if huawei_ap_data else [],
                 "ssid_distribution": huawei_ap_data.ssid_distribution if huawei_ap_data else {},
+            },
+            "nce": {
+                "status": "Normal" if huawei_ap_data else "Error",
+                "ap_normal": huawei_ap_data.normal_count if huawei_ap_data else 0,
+                "ap_fault": huawei_ap_data.fault_count if huawei_ap_data else 0,
+                "users": huawei_ap_data.total_users if huawei_ap_data else 0,
+                "error": None if huawei_ap_data else "Data NCE tidak tersedia",
             },
             "mrtg": mrtg_payload,
             "mrtg_error": mrtg_error,

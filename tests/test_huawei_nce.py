@@ -131,8 +131,8 @@ def test_wag_formatter_filters_wlc_and_renders_wac():
     assert "SW-CORE-01" in msg
     assert "SW-DIST-01" in msg
 
-    # WAC subsection rendered
-    assert "5. 🎛️ WAC Huawei (Live)" in msg
+    # Unified WAC/NCE subsection at item 5 (WAC controller metrics only; AP/Users are in Section D)
+    assert "5. 🎛️ Huawei WAC / iMaster NCE (Live)" in msg
     assert "Device Name → WAC-1-CORE" in msg
     assert "CPU Utilization → 20.00%" in msg
     assert "Memory Usage → 57.00%" in msg
@@ -140,11 +140,20 @@ def test_wag_formatter_filters_wlc_and_renders_wac():
     assert "Running Time → 120 days" in msg
     assert "Software Version → V200R019C00" in msg
 
+    # NCE AP/Users info MUST NOT be in Section C (already in Section D)
+    assert "📡 iMaster NCE (AP & Users)" not in msg
+    assert "AP Terhubung" not in msg
+    assert "Pengguna Aktif" not in msg
+
+    # Section numbering: Avg Uptime is 6, Analisa is 7
+    assert "6. ⏱️ Avg Uptime by Device" in msg
+    assert "7. 📝 Analisa Utilisasi" in msg
+
 
 def test_wag_formatter_wac_missing_or_error():
     # Missing WAC
     msg_missing = format_whatsapp_report({"date_str": "21 Oktober 2026"})
-    assert "5. 🎛️ WAC Huawei (Live)" in msg_missing
+    assert "5. 🎛️ Huawei WAC / iMaster NCE (Live)" in msg_missing
     assert "⚠️ Data WAC tidak tersedia" in msg_missing
 
     # Error WAC
@@ -154,8 +163,11 @@ def test_wag_formatter_wac_missing_or_error():
             "wac": {"error": "Connection timeout"},
         }
     )
-    assert "5. 🎛️ WAC Huawei (Live)" in msg_err
+    assert "5. 🎛️ Huawei WAC / iMaster NCE (Live)" in msg_err
     assert "⚠️ Gagal scrape (Connection timeout)" in msg_err
+
+    # NCE AP/Users must NOT be in Section C
+    assert "📡 iMaster NCE (AP & Users)" not in msg_missing
 
 
 def test_analyzer_no_wlc_branch():

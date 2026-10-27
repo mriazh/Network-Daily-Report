@@ -85,17 +85,26 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
             f"*B. 📊 Usage by MRTG*{header_extra}",
         ]
     )
-    for group_num, group_name in [
-        (1, "ASTINET"),
-        (2, "Metro-E"),
-        (3, "VPN IP"),
-        (4, "Telkom Indibiz"),
+    # Support both split keys (VPN IP (JTI), VPN IP (OSA)) and legacy single key (VPN IP)
+    vpn_jti = mrtg.get("VPN IP (JTI)", [])
+    vpn_osa = mrtg.get("VPN IP (OSA)", [])
+    vpn_legacy = mrtg.get("VPN IP", [])
+    # If split keys are empty but legacy exists, split legacy by name
+    if not vpn_jti and not vpn_osa and vpn_legacy:
+        for link_item in vpn_legacy:
+            name = link_item.get("name", "")
+            if "PARTNER-DC" in name.upper() or "STL" in name.upper() or "JTI" in name.upper():
+                vpn_jti.append(link_item)
+            else:
+                vpn_osa.append(link_item)
+
+    for group_num, group_name, links in [
+        (1, "ASTINET", mrtg.get("ASTINET", [])),
+        (2, "Metro-E", mrtg.get("Metro-E", [])),
+        (3, "VPN IP (JTI)", vpn_jti),
+        (4, "VPN IP (OSA)", vpn_osa),
+        (5, "Telkom Indibiz", mrtg.get("Telkom Indibiz", [])),
     ]:
-        links = (
-            mrtg.get(group_name, []) or mrtg.get("Telkom Indibiz", [])
-            if group_name == "Telkom Indibiz"
-            else mrtg.get(group_name, [])
-        )
         lines.extend(["", f"{group_num}. {group_name}"])
         if not links and mrtg_err:
             lines.append("  ⚠️ Gagal scrape")
@@ -187,9 +196,10 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "5. 🎛️ WAC Huawei (Live)",
+            "5. 🎛️ Huawei WAC / iMaster NCE (Live)",
         ]
     )
+    # Unified WAC/NCE section: show WAC controller metrics only (AP/Users are in Section D)
     wac = payload.get("wac")
     if wac and not wac.get("error"):
         cpu_str = f"{wac.get('cpu_pct'):.2f}%" if wac.get("cpu_pct") is not None else "-"
@@ -264,7 +274,13 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
                 p_text = "Kuota: - (No Active Package)"
             else:
                 p = active[0]
-                p_text = f"Kuota: {p.get('remaining_gb')} GB / {p.get('total_gb')} GB"
+                rem = p.get("remaining_gb")
+                tot = p.get("total_gb")
+                exp = p.get("expiry_str")
+                if exp:
+                    p_text = f"Kuota: {rem} GB / {tot} GB (Exp: {exp})"
+                else:
+                    p_text = f"Kuota: {rem} GB / {tot} GB"
             lines.append(f"{idx}. {m.get('location')}: {p_text}")
 
     lines.extend(

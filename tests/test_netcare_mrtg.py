@@ -329,6 +329,55 @@ def test_gemini_captcha_solver():
     assert solver._next_key_index == 1
 
 
+def test_gemini_captcha_solver_with_proxy(monkeypatch):
+    """Test that GeminiCaptchaSolver accepts proxy configuration and builds ProxyHandler."""
+    # Test without proxy
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+        proxy=None,
+    )
+    assert solver._proxy is None
+    assert solver._proxy_handler is None
+
+    # Test with explicit proxy
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+        proxy="socks5://127.0.0.1:40000",
+    )
+    assert solver._proxy == "socks5://127.0.0.1:40000"
+    assert solver._proxy_handler is not None
+
+    # Test with HTTP proxy
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+        proxy="http://proxy.example.com:8080",
+    )
+    assert solver._proxy == "http://proxy.example.com:8080"
+    assert solver._proxy_handler is not None
+
+    # Test fallback to env var
+    monkeypatch.setenv("NETCARE_CAPTCHA_PROXY", "socks5://env:40000")
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+        proxy=None,
+    )
+    assert solver._proxy == "socks5://env:40000"
+    monkeypatch.delenv("NETCARE_CAPTCHA_PROXY")
+
+    monkeypatch.setenv("ALL_PROXY", "socks5://all:40000")
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+        proxy=None,
+    )
+    assert solver._proxy == "socks5://all:40000"
+    monkeypatch.delenv("ALL_PROXY")
+
+
 def test_netcare_scraper_capture_all(tmp_path: Path):
     scraper = NetcareScraper(
         base_url="https://telkomcare.example.internal",

@@ -153,6 +153,7 @@ class NetcareSettings(BaseModel):
     captcha_models: str = Field(
         default="gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash"
     )
+    captcha_proxy: str | None = Field(default=None)
     profile_dir: Path | None = None
     cookie_cache_path: Path | None = None
     headless: bool = Field(default=True)
@@ -344,6 +345,7 @@ def load_config() -> AppConfig:
             "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash",
         ),
     )
+    netcare_proxy = os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY") or None
     netcare_set = NetcareSettings(
         enabled=os.getenv("NETCARE_ENABLED", "true").lower() in ("true", "1", "yes"),
         base_url=os.getenv("TELKOMCARE_GRAPH_URL")
@@ -355,6 +357,7 @@ def load_config() -> AppConfig:
         in ("true", "1", "yes"),
         captcha_api_keys=netcare_api_keys,
         captcha_models=netcare_models,
+        captcha_proxy=netcare_proxy,
         profile_dir=_resolve_repo_path(os.getenv("NETCARE_PROFILE_DIR"))
         or (ROOT_DIR / "output" / "profiles" / "netcare"),
         cookie_cache_path=_resolve_repo_path(os.getenv("NETCARE_COOKIE_CACHE"))

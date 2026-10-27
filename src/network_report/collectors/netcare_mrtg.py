@@ -10,12 +10,13 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pyotp
 
@@ -310,18 +311,42 @@ def _is_crash_or_webdriver_exception(exc: BaseException) -> bool:
     return "stacktrace" in msg or "webdriver" in name or "crash" in msg.lower()
 
 
+def _build_proxy_handler(proxy: str | None) -> urllib.request.BaseHandler | None:
+    """Build a ProxyHandler for urllib if proxy is configured.
+
+    Supports http://, https://, socks5://, socks5h:// schemes.
+    """
+    if not proxy:
+        return None
+    parsed = urllib.parse.urlparse(proxy)
+    if parsed.scheme in ("http", "https"):
+        return urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    if parsed.scheme in ("socks5", "socks5h"):
+        try:
+            import socks  # type: ignore  # noqa: F401
+        except Exception:
+            logger.warning(
+                "PySocks not installed; SOCKS5 proxy %s cannot be used", proxy
+            )
+            return None
+        return urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    logger.warning("Unsupported proxy scheme: %s", parsed.scheme)
+    return None
+
+
 class GeminiCaptchaSolver:
     def __init__(
         self,
         api_keys: list[str],
         models: list[str],
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
-        transport: Callable[[str, dict[str, Any]], tuple[int, dict[str, Any]]] | None = None,
+        proxy: str | None = None,
     ) -> None:
         self.api_keys = [k.strip() for k in api_keys if k.strip()]
         self.models = [m.strip() for m in models if m.strip()]
         self.timeout_seconds = timeout_seconds
-        self._transport = transport or self._default_transport
+        self._proxy = proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
+        self._proxy_handler = _build_proxy_handler(self._proxy)
         self._blacklisted_models: set[str] = set()
         self._next_key_index = 0
 
@@ -331,8 +356,11 @@ class GeminiCaptchaSolver:
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
+        opener = urllib.request.build_opener()
+        if self._proxy_handler:
+            opener.add_handler(self._proxy_handler)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+            with opener.open(req, timeout=self.timeout_seconds) as response:
                 body = response.read().decode("utf-8")
                 return 200, json.loads(body)
         except urllib.error.HTTPError as exc:
@@ -635,6 +663,7 @@ class NetcareScraper:
         captcha_enabled: bool = True,
         captcha_api_keys: list[str] | None = None,
         captcha_models: list[str] | None = None,
+        captcha_proxy: str | None = None,
         profile_dir: Path | None = None,
         cookie_cache_path: Path | None = None,
         headless: bool = True,
@@ -661,6 +690,7 @@ class NetcareScraper:
             "gemini-3.1-flash-lite",
             "gemini-2.5-flash",
         ]
+        self.captcha_proxy = captcha_proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
         self.profile_dir = Path(profile_dir) if profile_dir else None
         if cookie_cache_path:
             self.cookie_cache_path = Path(cookie_cache_path)
@@ -678,6 +708,7 @@ class NetcareScraper:
         self.captcha_solver = GeminiCaptchaSolver(
             api_keys=self.captcha_api_keys,
             models=self.captcha_models,
+            proxy=self.captcha_proxy,
         )
         self.legend_extractor = LegendExtractor(
             api_keys=self.captcha_api_keys,
