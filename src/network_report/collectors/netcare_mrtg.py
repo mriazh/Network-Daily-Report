@@ -341,6 +341,7 @@ class GeminiCaptchaSolver:
         models: list[str],
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         proxy: str | None = None,
+        transport: callable | None = None,
     ) -> None:
         self.api_keys = [k.strip() for k in api_keys if k.strip()]
         self.models = [m.strip() for m in models if m.strip()]
@@ -349,6 +350,7 @@ class GeminiCaptchaSolver:
         self._proxy_handler = _build_proxy_handler(self._proxy)
         self._blacklisted_models: set[str] = set()
         self._next_key_index = 0
+        self._transport = transport or self._default_transport
 
     def _default_transport(self, url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         req = urllib.request.Request(
@@ -435,7 +437,12 @@ class GeminiCaptchaSolver:
 
 
 class LegendExtractor:
-    def __init__(self, api_keys: list[str] | None = None, models: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        api_keys: list[str] | None = None,
+        models: list[str] | None = None,
+        proxy: str | None = None,
+    ) -> None:
         self.api_keys = [k.strip() for k in (api_keys or []) if k.strip()]
         self.models = [
             m.strip()
@@ -444,6 +451,8 @@ class LegendExtractor:
             )
             if m.strip()
         ]
+        self._proxy = proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
+        self._proxy_handler = _build_proxy_handler(self._proxy)
 
     def extract(self, image_path: Path) -> dict[str, str | None]:
         paddle_vals = self._extract_paddle(image_path)
@@ -622,7 +631,10 @@ class LegendExtractor:
                     headers={"Content-Type": "application/json"},
                 )
                 try:
-                    with urllib.request.urlopen(req, timeout=30) as resp:
+                    opener = urllib.request.build_opener()
+                    if self._proxy_handler:
+                        opener.add_handler(self._proxy_handler)
+                    with opener.open(req, timeout=30) as resp:
                         body = json.loads(resp.read().decode("utf-8"))
                         text = GeminiCaptchaSolver._extract_text(body)
                         if text:
@@ -713,6 +725,7 @@ class NetcareScraper:
         self.legend_extractor = LegendExtractor(
             api_keys=self.captcha_api_keys,
             models=self.captcha_models,
+            proxy=self.captcha_proxy,
         )
 
     def _create_driver(self, profile_subpath: Path | None = None) -> Any:

@@ -304,6 +304,35 @@ def test_mocked_legend_extraction_gemini_fallback(tmp_path: Path):
         assert res["Outbound_Maximum"] == "1.20 M"
 
 
+def test_legend_extractor_proxy_support(monkeypatch):
+    """Test that LegendExtractor accepts proxy configuration and builds ProxyHandler."""
+    # Test without proxy
+    extractor = LegendExtractor()
+    assert extractor._proxy is None
+    assert extractor._proxy_handler is None
+
+    # Test with explicit proxy
+    extractor = LegendExtractor(proxy="socks5://127.0.0.1:40000")
+    assert extractor._proxy == "socks5://127.0.0.1:40000"
+    assert extractor._proxy_handler is not None
+
+    # Test with HTTP proxy
+    extractor = LegendExtractor(proxy="http://proxy.example.com:8080")
+    assert extractor._proxy == "http://proxy.example.com:8080"
+    assert extractor._proxy_handler is not None
+
+    # Test fallback to env var
+    monkeypatch.setenv("NETCARE_CAPTCHA_PROXY", "socks5://env:40000")
+    extractor = LegendExtractor(proxy=None)
+    assert extractor._proxy == "socks5://env:40000"
+    monkeypatch.delenv("NETCARE_CAPTCHA_PROXY")
+
+    monkeypatch.setenv("ALL_PROXY", "socks5://all:40000")
+    extractor = LegendExtractor(proxy=None)
+    assert extractor._proxy == "socks5://all:40000"
+    monkeypatch.delenv("ALL_PROXY")
+
+
 def test_gemini_captcha_solver():
     solver = GeminiCaptchaSolver(
         api_keys=["key1", "key2"],
@@ -327,6 +356,19 @@ def test_gemini_captcha_solver():
     code = solver.solve(b"fake_image_bytes")
     assert code == "7xk"
     assert solver._next_key_index == 1
+
+
+def test_gemini_captcha_solver_transport_default():
+    """Test that _transport defaults to _default_transport when not provided."""
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1"],
+        models=["model1"],
+    )
+    # _transport should be set to the _default_transport method
+    assert solver._transport is not None
+    assert callable(solver._transport)
+    # Verify it's the default transport (same underlying function)
+    assert solver._transport.__func__ is solver._default_transport.__func__
 
 
 def test_gemini_captcha_solver_with_proxy(monkeypatch):

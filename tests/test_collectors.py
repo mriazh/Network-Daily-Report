@@ -235,6 +235,8 @@ def test_wag_formatter():
     assert "*MONITORING NETWORK INFRASTRUCTURE*" in msg
     assert "12 Oktober 2026" in msg
     assert "SITE.1 → 2.50 GB" in msg
+    # Section D header must reflect 14:00 WIB peak hour data source
+    assert "*D. 📶 AP Huawei (Data: 14.00 WIB)*" in msg
 
 
 def test_wag_top_usage_headers_are_distinct():
