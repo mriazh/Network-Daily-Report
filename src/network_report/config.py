@@ -345,7 +345,11 @@ def load_config() -> AppConfig:
             "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash",
         ),
     )
-    netcare_proxy = os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY") or None
+    # Proxy auto-fallback: if NETCARE_CAPTCHA_PROXY and ALL_PROXY are not set,
+    # but WARP_PROXY_PORT is defined, use socks5h://127.0.0.1:{WARP_PROXY_PORT}
+    warp_port = os.getenv("WARP_PROXY_PORT", "40000")
+    default_warp_proxy = f"socks5h://127.0.0.1:{warp_port}" if os.getenv("WARP_PROXY_PORT") else None
+    netcare_proxy = os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY") or default_warp_proxy
     netcare_set = NetcareSettings(
         enabled=os.getenv("NETCARE_ENABLED", "true").lower() in ("true", "1", "yes"),
         base_url=os.getenv("TELKOMCARE_GRAPH_URL")

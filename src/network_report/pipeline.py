@@ -557,6 +557,7 @@ def run_daily_pipeline(
                         captcha_enabled=cfg.netcare.captcha_enabled,
                         captcha_api_keys=api_keys,
                         captcha_models=models,
+                        captcha_proxy=cfg.netcare.captcha_proxy,
                         profile_dir=cfg.netcare.profile_dir,
                         cookie_cache_path=cfg.netcare.cookie_cache_path,
                         headless=cfg.netcare.headless,

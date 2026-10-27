@@ -337,13 +337,17 @@ def _build_proxy_handler(proxy: str | None) -> urllib.request.BaseHandler | None
 class GeminiCaptchaSolver:
     def __init__(
         self,
-        api_keys: list[str],
+        api_keys: list[str] | str,
         models: list[str],
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         proxy: str | None = None,
         transport: callable | None = None,
     ) -> None:
-        self.api_keys = [k.strip() for k in api_keys if k.strip()]
+        # Defensive parsing: accept api_keys as comma-separated string or list
+        if isinstance(api_keys, str):
+            self.api_keys = [k.strip() for k in api_keys.split(",") if k.strip()]
+        else:
+            self.api_keys = [k.strip() for k in api_keys if k.strip()]
         self.models = [m.strip() for m in models if m.strip()]
         self.timeout_seconds = timeout_seconds
         self._proxy = proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
@@ -447,7 +451,7 @@ class LegendExtractor:
         self.models = [
             m.strip()
             for m in (
-                models or ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
+                models or ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
             )
             if m.strip()
         ]
@@ -700,7 +704,6 @@ class NetcareScraper:
         self.captcha_models = captcha_models or [
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
         ]
         self.captcha_proxy = captcha_proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
         self.profile_dir = Path(profile_dir) if profile_dir else None
