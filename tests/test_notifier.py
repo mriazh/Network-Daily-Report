@@ -57,24 +57,24 @@ def test_test_mode_message_formats():
 def test_ap_sampler_lifecycle_messages():
     n = _Recorder()
     n.send_ap_sample_started("12 Oktober 2026")
-    n.send_ap_sample_success("12 Oktober 2026", 454, 1, 2500, 45.3)
+    n.send_ap_sample_success("12 Oktober 2026", 454, 1, 2500, 45.3, indoor_ok=328, outdoor_ok=115, fault_names=["AP-H2-L1-OUT03"])
     n.send_ap_sample_failed("12 Oktober 2026", "login failed")
     assert n.sent == [
-        "[HUAWEI AP SAMPLER] 🚀 Memulai sampling data AP Peak Hour (14:00 WIB)...",
-        "[HUAWEI AP SAMPLER] ✅ Selesai sampling data AP Peak Hour:\n📅 Tanggal: 12 Oktober 2026 (14:00 WIB)\n📶 Status AP: 🟢 454 Normal, 🔴 1 Fault\n👥 Connected Users: 2500 Users\n⏱️ Durasi: 45s",
-        "[HUAWEI AP SAMPLER] ❌ Gagal sampling data AP: login failed",
+        "[HUAWEI AP SAMPLER] [START] 🚀 Memulai sampling data AP Peak Hour (14:00 WIB)...",
+        "[HUAWEI AP SAMPLER] [END] ✅ Selesai sampling data AP Peak Hour:\n📅 Tanggal: 12 Oktober 2026 (14:00 WIB)\n📶 Status AP: 🟢 454 Normal, 🔴 1 Fault (AP-H2-L1-OUT03)\n🏢 Fisik AP: 328 Indoor OK, 115 Outdoor OK\n👥 Connected Users: 2500 Users\n⏱️ Durasi: 45s",
+        "[HUAWEI AP SAMPLER] [FAILED] ❌ Gagal sampling data AP: login failed",
     ]
 
 
 def test_ap_sampler_test_mode_messages():
     n = _Recorder()
     n.send_ap_sample_started("12 Oktober 2026", test_mode=True)
-    n.send_ap_sample_success("12 Oktober 2026", 454, 1, 2500, 45.3, test_mode=True)
+    n.send_ap_sample_success("12 Oktober 2026", 454, 1, 2500, 45.3, test_mode=True, indoor_ok=328, outdoor_ok=115, fault_names=["AP-H2-L1-OUT03"])
     n.send_ap_sample_failed("12 Oktober 2026", "login failed", test_mode=True)
     assert n.sent == [
-        "[TEST] [HUAWEI AP SAMPLER] 🚀 Memulai sampling data AP Peak Hour (14:00 WIB)...",
-        "[TEST] [HUAWEI AP SAMPLER] ✅ Selesai sampling data AP Peak Hour:\n📅 Tanggal: 12 Oktober 2026 (14:00 WIB)\n📶 Status AP: 🟢 454 Normal, 🔴 1 Fault\n👥 Connected Users: 2500 Users\n⏱️ Durasi: 45s",
-        "[TEST] [HUAWEI AP SAMPLER] ❌ Gagal sampling data AP: login failed",
+        "[TEST] [HUAWEI AP SAMPLER] [START] 🚀 Memulai sampling data AP Peak Hour (14:00 WIB)...",
+        "[TEST] [HUAWEI AP SAMPLER] [END] ✅ Selesai sampling data AP Peak Hour:\n📅 Tanggal: 12 Oktober 2026 (14:00 WIB)\n📶 Status AP: 🟢 454 Normal, 🔴 1 Fault (AP-H2-L1-OUT03)\n🏢 Fisik AP: 328 Indoor OK, 115 Outdoor OK\n👥 Connected Users: 2500 Users\n⏱️ Durasi: 45s",
+        "[TEST] [HUAWEI AP SAMPLER] [FAILED] ❌ Gagal sampling data AP: login failed",
     ]
 
 

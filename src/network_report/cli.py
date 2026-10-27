@@ -396,13 +396,25 @@ def main(argv: list[str] | None = None) -> int:
                 normal = huawei_ap_data.normal_count
                 fault = huawei_ap_data.fault_count
                 users = huawei_ap_data.total_users
+                indoor_ok = huawei_ap_data.indoor_ok
+                outdoor_ok = huawei_ap_data.outdoor_ok
+                fault_names = huawei_ap_data.fault_ap_names
             else:
                 normal = 0
                 fault = 0
                 users = 0
+                indoor_ok = 0
+                outdoor_ok = 0
+                fault_names = []
 
             if notifier is not None:
-                notifier.send_ap_sample_success(date_str, normal, fault, users, duration, test_mode=args.test)
+                notifier.send_ap_sample_success(
+                    date_str, normal, fault, users, duration,
+                    test_mode=args.test,
+                    indoor_ok=indoor_ok,
+                    outdoor_ok=outdoor_ok,
+                    fault_names=fault_names,
+                )
 
             print(f"AP Sampler completed: {normal} normal, {fault} fault, {users} users in {duration:.1f}s")
             return 0

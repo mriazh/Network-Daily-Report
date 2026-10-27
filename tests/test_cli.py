@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from network_report.cli import main
 from network_report.collectors.cmp_crawler import CmpExportResult
 
@@ -188,6 +190,10 @@ def test_sample_ap_with_mocked_collector(monkeypatch, tmp_path, capsys):
     assert args[1] == 2  # normal
     assert args[2] == 1  # fault
     assert args[3] == 30  # users
+    assert args[4] == pytest.approx(1.0, abs=1.0)  # duration (approximately 1 second)
+    assert kwargs.get("indoor_ok") == 2
+    assert kwargs.get("outdoor_ok") == 0
+    assert kwargs.get("fault_names") == ["AP-03"]
 
     captured = capsys.readouterr()
     assert "AP Sampler completed" in captured.out
