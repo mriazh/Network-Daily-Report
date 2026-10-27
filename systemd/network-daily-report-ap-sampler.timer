@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger Huawei AP Peak Hour Sampler daily at 14:00 WIB
+Requires=network-daily-report-ap-sampler.service
+
+[Timer]
+OnCalendar=*-*-* 14:00:00
+Timezone=Asia/Jakarta
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

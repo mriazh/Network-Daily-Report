@@ -103,3 +103,35 @@ class GowaNotifier:
         prefix = "[TEST] " if test_mode else ""
         message = f"{prefix}[Network Daily Report] FAILED | date={target_date_str} | error={error}"
         return self.send_message(message)
+
+    def send_ap_sample_started(self, target_date_str: str, test_mode: bool = False) -> bool:
+        """Send AP Sampler START notification."""
+        prefix = "[TEST] " if test_mode else ""
+        message = f"{prefix}[HUAWEI AP SAMPLER] 🚀 Memulai sampling data AP Peak Hour (14:00 WIB)..."
+        return self.send_message(message)
+
+    def send_ap_sample_success(
+        self,
+        target_date_str: str,
+        normal: int,
+        fault: int,
+        users: int,
+        duration_sec: float,
+        test_mode: bool = False,
+    ) -> bool:
+        """Send AP Sampler SUCCESS notification with summary."""
+        prefix = "[TEST] " if test_mode else ""
+        message = (
+            f"{prefix}[HUAWEI AP SAMPLER] ✅ Selesai sampling data AP Peak Hour:\n"
+            f"📅 Tanggal: {target_date_str} (14:00 WIB)\n"
+            f"📶 Status AP: 🟢 {normal} Normal, 🔴 {fault} Fault\n"
+            f"👥 Connected Users: {users} Users\n"
+            f"⏱️ Durasi: {format_duration(duration_sec)}"
+        )
+        return self.send_message(message)
+
+    def send_ap_sample_failed(self, target_date_str: str, error: str, test_mode: bool = False) -> bool:
+        """Send AP Sampler FAILED notification."""
+        prefix = "[TEST] " if test_mode else ""
+        message = f"{prefix}[HUAWEI AP SAMPLER] ❌ Gagal sampling data AP: {error}"
+        return self.send_message(message)

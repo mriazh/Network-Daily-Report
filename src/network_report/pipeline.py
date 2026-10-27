@@ -471,34 +471,12 @@ def run_daily_pipeline(
         huawei_ap_data: HuaweiApData | None = None
         wac_status: WacStatus | None = None
         if cfg.huawei.enabled:
-            try:
-                selectors = {
-                    "login_username": cfg.huawei.sel_login_username,
-                    "login_password": cfg.huawei.sel_login_password,
-                    "login_submit": cfg.huawei.sel_login_submit,
-                    "nav_ap": cfg.huawei.sel_nav_ap,
-                    "nav_ssid": cfg.huawei.sel_nav_ssid,
-                    "nav_ac": cfg.huawei.sel_nav_ac,
-                    "export_ap": cfg.huawei.sel_export_ap,
-                    "export_ssid": cfg.huawei.sel_export_ssid,
-                }
-                collector = NceCollector(
-                    base_url=cfg.huawei.base_url,
-                    username=cfg.huawei.username,
-                    password=cfg.huawei.password,
-                    selectors=selectors,
-                    headless=cfg.huawei.headless,
-                    timeout_seconds=cfg.huawei.export_timeout_seconds,
-                    output_root=cfg.output_root,
-                )
-                nce_export = collector.collect(date_compact)
-                collector.close()
-                if nce_export.wac:
-                    wac_status = nce_export.wac
-            except Exception as e:
-                logger.error("Error executing NceCollector: %s", e)
-
-            if not wac_status:
+            # Check if 14:00 WIB peak hour AP snapshot already exists (non-empty apInfo.csv)
+            ap_1400_file = cfg.output_raw_root / "huawei_ap" / date_compact / "apInfo.csv"
+            if ap_1400_file.exists() and ap_1400_file.stat().st_size > 0:
+                logger.info("Using existing 14:00 WIB peak hour AP snapshot from %s", ap_1400_file)
+                huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
+                # Still try to get WAC status if available
                 wac_saved = cfg.output_root / "raw" / "wac" / date_compact / "wac_status.json"
                 if wac_saved.exists():
                     try:
@@ -506,8 +484,45 @@ def run_daily_pipeline(
                         wac_status = WacStatus(**w_dict)
                     except Exception:
                         pass
+            else:
+                # No 14:00 snapshot, run NceCollector to get fresh data
+                try:
+                    selectors = {
+                        "login_username": cfg.huawei.sel_login_username,
+                        "login_password": cfg.huawei.sel_login_password,
+                        "login_submit": cfg.huawei.sel_login_submit,
+                        "nav_ap": cfg.huawei.sel_nav_ap,
+                        "nav_ssid": cfg.huawei.sel_nav_ssid,
+                        "nav_ac": cfg.huawei.sel_nav_ac,
+                        "export_ap": cfg.huawei.sel_export_ap,
+                        "export_ssid": cfg.huawei.sel_export_ssid,
+                    }
+                    collector = NceCollector(
+                        base_url=cfg.huawei.base_url,
+                        username=cfg.huawei.username,
+                        password=cfg.huawei.password,
+                        selectors=selectors,
+                        headless=cfg.huawei.headless,
+                        timeout_seconds=cfg.huawei.export_timeout_seconds,
+                        output_root=cfg.output_root,
+                    )
+                    nce_export = collector.collect(date_compact)
+                    collector.close()
+                    if nce_export.wac:
+                        wac_status = nce_export.wac
+                except Exception as e:
+                    logger.error("Error executing NceCollector: %s", e)
 
-            huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
+                if not wac_status:
+                    wac_saved = cfg.output_root / "raw" / "wac" / date_compact / "wac_status.json"
+                    if wac_saved.exists():
+                        try:
+                            w_dict = json.loads(wac_saved.read_text(encoding="utf-8"))
+                            wac_status = WacStatus(**w_dict)
+                        except Exception:
+                            pass
+
+                huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
 
         # Orbit Modems
         orbit_modems: list[OrbitModem] = []

@@ -183,6 +183,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Simulate backfill without invoking CMP crawler",
     )
 
+    # Command: sample-ap (14:00 WIB Peak Hour AP Sampler)
+    ap_sampler_parser = subparsers.add_parser(
+        "sample-ap",
+        help="Run 14:00 WIB Peak Hour AP sampling (NCE AP/SSID/WAC snapshot)",
+    )
+    ap_sampler_parser.add_argument(
+        "--date",
+        default="today",
+        help="Target date to sample (YYYY-MM-DD, 'today', or 'yesterday')",
+    )
+    ap_sampler_parser.add_argument("--send-wa", action="store_true", help="Send WhatsApp notice via GOWA")
+    ap_sampler_parser.add_argument(
+        "--test", action="store_true", help="Include test banner in WhatsApp notification"
+    )
+
     args = parser.parse_args(argv)
     cfg = load_config()
 
@@ -315,6 +330,90 @@ def main(argv: list[str] | None = None) -> int:
             curr += timedelta(days=1)
 
         return 0
+
+    elif args.command == "sample-ap":
+        from datetime import datetime, timedelta
+        from .collectors.huawei_ap import collect_huawei_ap_data
+        from .collectors.huawei_nce import NceCollector
+
+        target_dt = (
+            datetime.now()
+            if args.date == "today"
+            else (
+                datetime.strptime(args.date, "%Y-%m-%d")
+                if "-" in args.date
+                else datetime.now() - timedelta(days=1)
+            )
+        )
+        date_iso = target_dt.strftime("%Y-%m-%d")
+        date_str = target_dt.strftime("%d %B %Y")
+        date_compact = target_dt.strftime("%Y%m%d")
+
+        print(f"Executing 14:00 WIB Peak Hour AP Sampler for: {date_iso}...")
+
+        notifier = GowaNotifier(cfg.gowa) if args.send_wa else None
+        if notifier is not None:
+            notifier.send_ap_sample_started(date_str, test_mode=args.test)
+
+        import time
+        start_time = time.time()
+        error_msg = None
+
+        try:
+            # Run NceCollector to export AP, SSID, and WAC data
+            selectors = {
+                "login_username": cfg.huawei.sel_login_username,
+                "login_password": cfg.huawei.sel_login_password,
+                "login_submit": cfg.huawei.sel_login_submit,
+                "nav_ap": cfg.huawei.sel_nav_ap,
+                "nav_ssid": cfg.huawei.sel_nav_ssid,
+                "nav_ac": cfg.huawei.sel_nav_ac,
+                "export_ap": cfg.huawei.sel_export_ap,
+                "export_ssid": cfg.huawei.sel_export_ssid,
+            }
+            collector = NceCollector(
+                base_url=cfg.huawei.base_url,
+                username=cfg.huawei.username,
+                password=cfg.huawei.password,
+                selectors=selectors,
+                headless=cfg.huawei.headless,
+                timeout_seconds=cfg.huawei.export_timeout_seconds,
+                output_root=cfg.output_root,
+            )
+            nce_export = collector.collect(date_compact)
+            collector.close()
+
+            if nce_export.error:
+                error_msg = nce_export.error
+                raise RuntimeError(nce_export.error)
+
+            # Parse AP summary
+            huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
+
+            duration = time.time() - start_time
+
+            if huawei_ap_data:
+                normal = huawei_ap_data.normal_count
+                fault = huawei_ap_data.fault_count
+                users = huawei_ap_data.total_users
+            else:
+                normal = 0
+                fault = 0
+                users = 0
+
+            if notifier is not None:
+                notifier.send_ap_sample_success(date_str, normal, fault, users, duration, test_mode=args.test)
+
+            print(f"AP Sampler completed: {normal} normal, {fault} fault, {users} users in {duration:.1f}s")
+            return 0
+
+        except Exception as exc:
+            duration = time.time() - start_time
+            error_msg = str(exc)
+            if notifier is not None:
+                notifier.send_ap_sample_failed(date_str, error_msg, test_mode=args.test)
+            print(f"AP Sampler failed: {error_msg}")
+            return 1
 
     elif args.command == "run":
         print(f"Executing daily report pipeline for: {args.date}...")
