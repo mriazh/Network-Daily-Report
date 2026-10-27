@@ -1446,7 +1446,7 @@ def test_target_crash_retried_once_with_new_driver_and_succeeds(tmp_path: Path):
         drivers_created[2].quit.assert_called_once()
 
 
-def test_target_fails_twice_yields_sample_with_error_and_no_values(tmp_path: Path):
+def test_target_fails_thrice_yields_sample_with_error_and_no_values(tmp_path: Path):
     from selenium.common.exceptions import WebDriverException
 
     scraper = NetcareScraper(
@@ -1464,7 +1464,7 @@ def test_target_fails_twice_yields_sample_with_error_and_no_values(tmp_path: Pat
             f"Message: renderer crash attempt {capture_attempts}\nStacktrace: fatal"
         )
 
-    targets = [MrtgTarget(target_id="SID-FAIL-TWICE", kind="sid")]
+    targets = [MrtgTarget(target_id="SID-FAIL-THREE", kind="sid")]
     target_date = date(2026, 10, 22)
 
     with (
@@ -1476,7 +1476,7 @@ def test_target_fails_twice_yields_sample_with_error_and_no_values(tmp_path: Pat
         samples = scraper.capture_all(targets, target_date, output_dir=tmp_path / "out")
         assert len(samples) == 1
         sample = samples[0]
-        assert capture_attempts == 2
+        assert capture_attempts == 3
         assert sample.error is not None
         assert "Stacktrace" in sample.error or "WebDriverException" in sample.error
         assert sample.inbound_current is None

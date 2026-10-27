@@ -475,12 +475,19 @@ def test_run_cmp_crawler_failure_logging(monkeypatch, tmp_path, caplog):
             output_dir=tmp_path,
             headless=True,
             monthly_export_enabled=True,
+            max_attempts=3,
         )
 
     assert result.daily_file is None
     assert result.monthly_file is None
+    assert result.error is not None
+    # Verify 3 attempts were made
+    assert "CMP crawler attempt 1/3 failed" in caplog.text
+    assert "CMP crawler attempt 2/3 failed" in caplog.text
+    assert "CMP crawler attempt 3/3 failed" in caplog.text
+    assert "All 3 CMP crawler attempts failed" in caplog.text
+    # Daily export failure message should be in the logs
     assert "Daily export failed: could not set report type 'Daily'" in caplog.text
-    assert "Monthly export failed: download did not produce a file" in caplog.text
 
 
 def test_sort_and_export_with_icomoon_icon(tmp_path):

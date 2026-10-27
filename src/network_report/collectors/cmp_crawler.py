@@ -1203,6 +1203,7 @@ def run_cmp_crawler(
     warp_proxy_server: str = "",
     export_timeout_seconds: int | None = None,
     monthly_export_enabled: bool | None = None,
+    max_attempts: int = 3,
 ) -> CmpExportResult:
     """
     Run the CMP crawler to export both Daily and Monthly usage reports,
@@ -1225,6 +1226,7 @@ def run_cmp_crawler(
         otp_poll_interval_seconds: OTP polling interval
         proxy_server: Explicit proxy server for CMP (e.g., "socks5://127.0.0.1:40001")
         warp_proxy_server: WARP proxy server from config
+        max_attempts: Maximum number of attempts (default 3)
 
     Returns:
         CmpExportResult with paths to downloaded files and live_total_usage_gb
@@ -1262,117 +1264,125 @@ def run_cmp_crawler(
     if resolved_proxy:
         logger.info("Using proxy server: %s", resolved_proxy)
 
-    with sync_playwright() as p:
-        # Use Firefox with standard desktop user-agent to bypass portal restrictions
-        launch_args = {"headless": headless}
-        if resolved_proxy:
-            launch_args["proxy"] = {"server": resolved_proxy}
-        browser = p.firefox.launch(**launch_args)
-        context = browser.new_context(accept_downloads=True, user_agent=_get_firefox_user_agent())
-        page = context.new_page()
-        page.set_default_timeout(timeout_ms)
+    last_error: str | None = None
 
-        result = CmpExportResult()
-
+    for attempt in range(1, max_attempts + 1):
+        logger.info("Starting CMP crawler attempt %d/%d for %s", attempt, max_attempts, target_date)
         try:
-            # Step 1: Login with CAS and OTP handling
-            if not _login_cmp(
-                page,
-                base_url,
-                username,
-                password,
-                timeout_ms,
-                imap_host=imap_host,
-                imap_port=imap_port,
-                email=email,
-                email_password=email_password,
-                otp_timeout_seconds=otp_timeout_seconds,
-                otp_poll_interval_seconds=otp_poll_interval_seconds,
-            ):
-                result.error = "Login failed"
-                return result
+            with sync_playwright() as p:
+                # Use Firefox with standard desktop user-agent to bypass portal restrictions
+                launch_args = {"headless": headless}
+                if resolved_proxy:
+                    launch_args["proxy"] = {"server": resolved_proxy}
+                browser = p.firefox.launch(**launch_args)
+                context = browser.new_context(accept_downloads=True, user_agent=_get_firefox_user_agent())
+                page = context.new_page()
+                page.set_default_timeout(timeout_ms)
 
-            # Step 2: Navigate to Dashboard and extract live usage
-            if _navigate_to_dashboard(page, timeout_ms):
-                page.wait_for_timeout(15000)
-                # Save screenshot
-                _save_dashboard_screenshot_and_sidecar(page, output_dir, date_compact)
-            else:
-                logger.warning("Failed to navigate to dashboard; skipping screenshot")
+                result = CmpExportResult()
 
-            # Step 3: Handle 2FA if needed (fallback check)
-            if not _handle_2fa_if_needed(page, timeout_ms):
-                result.error = "2FA required but not automated"
-                return result
-
-            # Step 4: Navigate to Usage Query
-            if not _navigate_to_usage_query(page, timeout_ms):
-                result.error = "Navigation to Usage Query failed"
-                return result
-
-            # --- Daily Export ---
-            logger.info("Starting Daily export attempt for %s", target_date)
-            daily_ok = _set_report_type_and_date(page, "Daily", target_date, timeout_ms)
-            if daily_ok:
-                logger.info("Daily filter and date configured; initiating export and download")
                 try:
-                    daily_temp = _sort_and_export(
-                        page, timeout_ms, export_timeout_ms=export_timeout_ms
-                    )
-                except TypeError:
-                    daily_temp = _sort_and_export(page, timeout_ms)
-                if daily_temp and daily_temp.exists():
-                    final_name = f"report_{date_compact}_DAILY_USAGE_by_SIM.xlsx"
-                    final_path = iot_raw_dir / final_name
-                    daily_temp.replace(final_path)
-                    result.daily_file = final_path
-                    logger.info("Daily export succeeded, saved to: %s", final_path)
-                else:
-                    logger.warning("Daily export failed: download did not produce a file")
-            else:
-                logger.warning(
-                    "Daily export failed: could not set report type 'Daily' or target date %s",
-                    target_date,
-                )
+                    # Step 1: Login with CAS and OTP handling
+                    if not _login_cmp(
+                        page,
+                        base_url,
+                        username,
+                        password,
+                        timeout_ms,
+                        imap_host=imap_host,
+                        imap_port=imap_port,
+                        email=email,
+                        email_password=email_password,
+                        otp_timeout_seconds=otp_timeout_seconds,
+                        otp_poll_interval_seconds=otp_poll_interval_seconds,
+                    ):
+                        raise RuntimeError("Login failed")
 
-            # --- Monthly Export ---
-            if not monthly_export_enabled:
-                logger.info(
-                    "CMP monthly export is disabled; month-to-date figure will be summed from the daily exports"
-                )
-            else:
-                logger.info("Starting Monthly export attempt for %s", target_month)
-                monthly_ok = _set_report_type_and_date(page, "Monthly", target_month, timeout_ms)
-                if monthly_ok:
-                    logger.info(
-                        "Monthly filter and date configured; initiating export and download"
-                    )
-                    try:
-                        monthly_temp = _sort_and_export(
-                            page, timeout_ms, export_timeout_ms=export_timeout_ms
-                        )
-                    except TypeError:
-                        monthly_temp = _sort_and_export(page, timeout_ms)
-                    if monthly_temp and monthly_temp.exists():
-                        month_compact = target_month.replace("-", "")
-                        final_name = f"report_{month_compact}_MONTHLY_USAGE_by_SIM.xlsx"
-                        final_path = iot_raw_dir / final_name
-                        monthly_temp.replace(final_path)
-                        result.monthly_file = final_path
-                        logger.info("Monthly export succeeded, saved to: %s", final_path)
+                    # Step 2: Navigate to Dashboard and extract live usage
+                    if _navigate_to_dashboard(page, timeout_ms):
+                        page.wait_for_timeout(15000)
+                        # Save screenshot
+                        _save_dashboard_screenshot_and_sidecar(page, output_dir, date_compact)
                     else:
-                        logger.warning("Monthly export failed: download did not produce a file")
-                else:
-                    logger.warning(
-                        "Monthly export failed: could not set report type 'Monthly' or target month %s",
-                        target_month,
-                    )
+                        logger.warning("Failed to navigate to dashboard; skipping screenshot")
 
-        except Exception:
-            logger.exception("CMP crawler failed")
-            result.error = "Crawler failed"
-        finally:
-            context.close()
-            browser.close()
+                    # Step 3: Handle 2FA if needed (fallback check)
+                    if not _handle_2fa_if_needed(page, timeout_ms):
+                        raise RuntimeError("2FA required but not automated")
 
-    return result
+                    # Step 4: Navigate to Usage Query
+                    if not _navigate_to_usage_query(page, timeout_ms):
+                        raise RuntimeError("Navigation to Usage Query failed")
+
+                    # --- Daily Export ---
+                    logger.info("Starting Daily export attempt for %s", target_date)
+                    daily_ok = _set_report_type_and_date(page, "Daily", target_date, timeout_ms)
+                    if daily_ok:
+                        logger.info("Daily filter and date configured; initiating export and download")
+                        try:
+                            daily_temp = _sort_and_export(
+                                page, timeout_ms, export_timeout_ms=export_timeout_ms
+                            )
+                        except TypeError:
+                            daily_temp = _sort_and_export(page, timeout_ms)
+                        if daily_temp and daily_temp.exists():
+                            final_name = f"report_{date_compact}_DAILY_USAGE_by_SIM.xlsx"
+                            final_path = iot_raw_dir / final_name
+                            daily_temp.replace(final_path)
+                            result.daily_file = final_path
+                            logger.info("Daily export succeeded, saved to: %s", final_path)
+                        else:
+                            raise RuntimeError("Daily export failed: download did not produce a file")
+                    else:
+                        raise RuntimeError(f"Daily export failed: could not set report type 'Daily' or target date {target_date}")
+
+                    # --- Monthly Export ---
+                    if not monthly_export_enabled:
+                        logger.info(
+                            "CMP monthly export is disabled; month-to-date figure will be summed from the daily exports"
+                        )
+                    else:
+                        logger.info("Starting Monthly export attempt for %s", target_month)
+                        monthly_ok = _set_report_type_and_date(page, "Monthly", target_month, timeout_ms)
+                        if monthly_ok:
+                            logger.info(
+                                "Monthly filter and date configured; initiating export and download"
+                            )
+                            try:
+                                monthly_temp = _sort_and_export(
+                                    page, timeout_ms, export_timeout_ms=export_timeout_ms
+                                )
+                            except TypeError:
+                                monthly_temp = _sort_and_export(page, timeout_ms)
+                            if monthly_temp and monthly_temp.exists():
+                                month_compact = target_month.replace("-", "")
+                                final_name = f"report_{month_compact}_MONTHLY_USAGE_by_SIM.xlsx"
+                                final_path = iot_raw_dir / final_name
+                                monthly_temp.replace(final_path)
+                                result.monthly_file = final_path
+                                logger.info("Monthly export succeeded, saved to: %s", final_path)
+                            else:
+                                raise RuntimeError("Monthly export failed: download did not produce a file")
+                        else:
+                            raise RuntimeError(f"Monthly export failed: could not set report type 'Monthly' or target month {target_month}")
+
+                    logger.info("CMP crawler succeeded on attempt %d/%d", attempt, max_attempts)
+                    return result
+
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning("CMP crawler attempt %d/%d failed: %s", attempt, max_attempts, last_error)
+                finally:
+                    context.close()
+                    browser.close()
+
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("CMP crawler attempt %d/%d failed (outer): %s", attempt, max_attempts, last_error)
+
+        if attempt < max_attempts:
+            logger.info("Retrying CMP crawler in 5 seconds (attempt %d/%d)...", attempt + 1, max_attempts)
+            time.sleep(5)
+
+    logger.error("All %d CMP crawler attempts failed", max_attempts)
+    return CmpExportResult(error=last_error or "CMP crawler failed after all retries")

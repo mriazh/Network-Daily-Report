@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -69,6 +70,7 @@ class NceCollector:
         headless: bool = True,
         timeout_seconds: int = 120,
         output_root: Path | None = None,
+        max_retries: int = 3,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self.username = username or ""
@@ -76,6 +78,7 @@ class NceCollector:
         self.headless = headless
         self.timeout_seconds = timeout_seconds
         self.output_root = output_root or Path("output")
+        self.max_retries = max(1, max_retries)
 
         sel = {
             "login_username": DEFAULT_SEL_LOGIN_USERNAME,
@@ -102,116 +105,131 @@ class NceCollector:
             logger.warning(err)
             return NceExport(error=err)
 
-        try:
-            self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=self.headless)
-            self._context = self._browser.new_context(
-                accept_downloads=True,
-                ignore_https_errors=True,
-            )
-            self._page = self._context.new_page()
-            self._page.set_default_timeout(self.timeout_seconds * 1000)
+        last_error: str | None = None
 
-            # Step 1: Login
-            login_url = f"{self.base_url}/view/login.html"
-            logger.info("Opening NCE login: %s", login_url)
-            self._page.goto(login_url, wait_until="domcontentloaded")
-            self._page.fill(self.selectors["login_username"], self.username)
-            self._page.fill(self.selectors["login_password"], self.password)
-            self._page.click(self.selectors["login_submit"])
-            self._page.wait_for_timeout(12000)
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                self._playwright = sync_playwright().start()
+                self._browser = self._playwright.chromium.launch(headless=self.headless)
+                self._context = self._browser.new_context(
+                    accept_downloads=True,
+                    ignore_https_errors=True,
+                )
+                self._page = self._context.new_page()
+                self._page.set_default_timeout(self.timeout_seconds * 1000)
 
-            if "/view/login.html" in self._page.url:
-                try:
-                    if self._page.is_visible(self.selectors["login_submit"]):
-                        err = "NCE login failed: still on login page"
-                        logger.error(err)
-                        return NceExport(error=err)
-                except Exception:
-                    pass
+                # Step 1: Login
+                login_url = f"{self.base_url}/view/login.html"
+                logger.info("Opening NCE login (attempt %d/%d): %s", attempt, self.max_retries, login_url)
+                self._page.goto(login_url, wait_until="domcontentloaded")
+                self._page.fill(self.selectors["login_username"], self.username)
+                self._page.fill(self.selectors["login_password"], self.password)
+                self._page.click(self.selectors["login_submit"])
+                self._page.wait_for_timeout(12000)
 
-            ap_dir = self.output_root / "raw" / "huawei_ap" / date_compact
-            ap_dir.mkdir(parents=True, exist_ok=True)
+                if "/view/login.html" in self._page.url:
+                    try:
+                        if self._page.is_visible(self.selectors["login_submit"]):
+                            err = "NCE login failed: still on login page"
+                            logger.error(err)
+                            raise RuntimeError(err)
+                    except RuntimeError:
+                        raise
+                    except Exception:
+                        pass
 
-            # Step 2: AP Export
-            ap_path = ap_dir / "apInfo.csv"
-            logger.info("Exporting Huawei AP CSV...")
-            self._page.click(self.selectors["nav_ap"])
-            self._page.wait_for_timeout(5000)
-            with self._page.expect_download(timeout=self.timeout_seconds * 1000) as download_info:
-                self._page.click(self.selectors["export_ap"])
-            download = download_info.value
-            download.save_as(str(ap_path))
-            logger.info("Saved AP CSV to %s", ap_path)
+                ap_dir = self.output_root / "raw" / "huawei_ap" / date_compact
+                ap_dir.mkdir(parents=True, exist_ok=True)
 
-            # Step 3: SSID Export
-            ssid_path = ap_dir / "ssidInfo.csv"
-            logger.info("Exporting Huawei SSID CSV...")
-            self._page.click(self.selectors["nav_ssid"])
-            self._page.wait_for_timeout(5000)
-            with self._page.expect_download(timeout=self.timeout_seconds * 1000) as download_info:
-                self._page.click(self.selectors["export_ssid"])
-            download = download_info.value
-            download.save_as(str(ssid_path))
-            logger.info("Saved SSID CSV to %s", ssid_path)
+                # Step 2: AP Export
+                ap_path = ap_dir / "apInfo.csv"
+                logger.info("Exporting Huawei AP CSV (attempt %d/%d)...", attempt, self.max_retries)
+                self._page.click(self.selectors["nav_ap"])
+                self._page.wait_for_timeout(5000)
+                with self._page.expect_download(timeout=self.timeout_seconds * 1000) as download_info:
+                    self._page.click(self.selectors["export_ap"])
+                download = download_info.value
+                download.save_as(str(ap_path))
+                logger.info("Saved AP CSV to %s", ap_path)
 
-            # Step 4: WAC AC Tab
-            logger.info("Reading Huawei WAC status...")
-            self._page.click(self.selectors["nav_ap"])
-            self._page.wait_for_timeout(2000)
-            self._page.click(self.selectors["nav_ac"])
-            self._page.wait_for_timeout(12000)
+                # Step 3: SSID Export
+                ssid_path = ap_dir / "ssidInfo.csv"
+                logger.info("Exporting Huawei SSID CSV (attempt %d/%d)...", attempt, self.max_retries)
+                self._page.click(self.selectors["nav_ssid"])
+                self._page.wait_for_timeout(5000)
+                with self._page.expect_download(timeout=self.timeout_seconds * 1000) as download_info:
+                    self._page.click(self.selectors["export_ssid"])
+                download = download_info.value
+                download.save_as(str(ssid_path))
+                logger.info("Saved SSID CSV to %s", ssid_path)
 
-            def _get_text(sel: str) -> str:
-                try:
-                    el = self._page.locator(sel)
-                    if el.count() > 0:
-                        return (el.first.inner_text() or "").strip()
-                except Exception as ex:
-                    logger.debug("Failed reading selector %s: %s", sel, ex)
-                return ""
+                # Step 4: WAC AC Tab
+                logger.info("Reading Huawei WAC status (attempt %d/%d)...", attempt, self.max_retries)
+                self._page.click(self.selectors["nav_ap"])
+                self._page.wait_for_timeout(2000)
+                self._page.click(self.selectors["nav_ac"])
+                self._page.wait_for_timeout(12000)
 
-            raw_cpu = _get_text("#cpuUsageCurrentValue")
-            raw_mem = _get_text("#memeryUsageCurrentValue")
-            dev_name = _get_text("#deviceInfo_deviceName")
-            dev_type = _get_text("#deviceInfo_deviceType")
-            temperature = _get_text("#deviceInfo_temperature")
-            running_time = _get_text("#deviceInfo_runningTime")
-            software_version = _get_text("#deviceInfo_softwareVersion")
-            serial_number = _get_text("#deviceInfo_serialNumber")
-            max_ap_count = _get_text("#deviceInfo_maxApCount")
+                def _get_text(sel: str) -> str:
+                    try:
+                        el = self._page.locator(sel)
+                        if el.count() > 0:
+                            return (el.first.inner_text() or "").strip()
+                    except Exception as ex:
+                        logger.debug("Failed reading selector %s: %s", sel, ex)
+                    return ""
 
-            wac_status = WacStatus(
-                cpu_pct=parse_wac_pct(raw_cpu),
-                mem_pct=parse_wac_pct(raw_mem),
-                device_name=dev_name,
-                device_type=dev_type,
-                temperature=temperature,
-                running_time=running_time,
-                software_version=software_version,
-                serial_number=serial_number,
-                max_ap_count=max_ap_count,
-                captured_at=datetime.now().isoformat(),
-                error=None,
-            )
+                raw_cpu = _get_text("#cpuUsageCurrentValue")
+                raw_mem = _get_text("#memeryUsageCurrentValue")
+                dev_name = _get_text("#deviceInfo_deviceName")
+                dev_type = _get_text("#deviceInfo_deviceType")
+                temperature = _get_text("#deviceInfo_temperature")
+                running_time = _get_text("#deviceInfo_runningTime")
+                software_version = _get_text("#deviceInfo_softwareVersion")
+                serial_number = _get_text("#deviceInfo_serialNumber")
+                max_ap_count = _get_text("#deviceInfo_maxApCount")
 
-            wac_dir = self.output_root / "raw" / "wac" / date_compact
-            wac_dir.mkdir(parents=True, exist_ok=True)
-            wac_json_path = wac_dir / "wac_status.json"
-            wac_json_path.write_text(json.dumps(asdict(wac_status), indent=2), encoding="utf-8")
-            logger.info("Saved WAC status to %s", wac_json_path)
+                wac_status = WacStatus(
+                    cpu_pct=parse_wac_pct(raw_cpu),
+                    mem_pct=parse_wac_pct(raw_mem),
+                    device_name=dev_name,
+                    device_type=dev_type,
+                    temperature=temperature,
+                    running_time=running_time,
+                    software_version=software_version,
+                    serial_number=serial_number,
+                    max_ap_count=max_ap_count,
+                    captured_at=datetime.now().isoformat(),
+                    error=None,
+                )
 
-            return NceExport(
-                ap_csv_path=ap_path,
-                ssid_csv_path=ssid_path,
-                wac=wac_status,
-                error=None,
-            )
+                wac_dir = self.output_root / "raw" / "wac" / date_compact
+                wac_dir.mkdir(parents=True, exist_ok=True)
+                wac_json_path = wac_dir / "wac_status.json"
+                wac_json_path.write_text(json.dumps(asdict(wac_status), indent=2), encoding="utf-8")
+                logger.info("Saved WAC status to %s", wac_json_path)
 
-        except Exception as e:
-            err_msg = str(e)
-            logger.error("NCE collection failed: %s", err_msg, exc_info=True)
-            return NceExport(error=err_msg)
+                logger.info("NCE collection succeeded on attempt %d/%d", attempt, self.max_retries)
+                return NceExport(
+                    ap_csv_path=ap_path,
+                    ssid_csv_path=ssid_path,
+                    wac=wac_status,
+                    error=None,
+                )
+
+            except Exception as e:
+                last_error = str(e)
+                logger.warning("NCE collection attempt %d/%d failed: %s", attempt, self.max_retries, last_error, exc_info=True)
+
+            finally:
+                self.close()
+
+            if attempt < self.max_retries:
+                logger.info("Retrying NCE collection in 3 seconds (attempt %d/%d)...", attempt + 1, self.max_retries)
+                time.sleep(3)
+
+        logger.error("All %d NCE collection attempts failed", self.max_retries)
+        return NceExport(error=last_error or "NCE collection failed after all retries")
 
     def close(self) -> None:
         try:

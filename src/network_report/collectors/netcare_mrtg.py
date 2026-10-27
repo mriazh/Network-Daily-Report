@@ -1229,66 +1229,35 @@ class NetcareScraper:
         def _worker_task(target_list: list[MrtgTarget], worker_idx: int) -> list[MrtgSample]:
             samples: list[MrtgSample] = []
             for t in target_list:
-                driver = self._new_session_driver(worker_idx)
-                used_driver = driver
-                try:
-                    logged_in = self._apply_cached_session(driver)
-                    if not logged_in:
-                        logger.warning(
-                            "Target %s (worker %d) found cached session unusable; performing login",
-                            t.target_id,
-                            worker_idx,
-                        )
-                        logged_in = self.login(driver)
+                max_attempts = 3  # 1 initial + 2 retries
+                sample = None
+                used_driver = None
 
-                    if not logged_in:
-                        sample = MrtgSample(target_id=t.target_id, error="login_failed")
-                    else:
-                        sample = self.capture(t, target_date, driver=driver, output_dir=dest_dir)
-                except Exception as exc:
-                    msg = str(exc)
-                    logger.warning(
-                        "Capture attempt failed for %s (worker %d): %s",
-                        t.target_id,
-                        worker_idx,
-                        exc,
-                    )
-                    sample = MrtgSample(
-                        target_id=t.target_id,
-                        error=msg or type(exc).__name__,
-                    )
-                finally:
-                    with contextlib.suppress(Exception):
-                        driver.quit()
-
-                if sample.error is not None:
-                    logger.info(
-                        "Retrying target %s once with a fresh driver (worker %d)",
-                        t.target_id,
-                        worker_idx,
-                    )
-                    retry_driver = self._new_session_driver(worker_idx)
-                    used_driver = retry_driver
+                for attempt in range(1, max_attempts + 1):
+                    driver = self._new_session_driver(worker_idx)
+                    used_driver = driver
                     try:
-                        logged_in = self._apply_cached_session(retry_driver)
+                        logged_in = self._apply_cached_session(driver)
                         if not logged_in:
                             logger.warning(
-                                "Retry for %s (worker %d) found cached session unusable; performing login",
+                                "Target %s (worker %d, attempt %d/%d) found cached session unusable; performing login",
                                 t.target_id,
                                 worker_idx,
+                                attempt,
+                                max_attempts,
                             )
-                            logged_in = self.login(retry_driver)
+                            logged_in = self.login(driver)
 
                         if not logged_in:
                             sample = MrtgSample(target_id=t.target_id, error="login_failed")
                         else:
-                            sample = self.capture(
-                                t, target_date, driver=retry_driver, output_dir=dest_dir
-                            )
+                            sample = self.capture(t, target_date, driver=driver, output_dir=dest_dir)
                     except Exception as exc:
                         msg = str(exc)
                         logger.warning(
-                            "Retry capture failed for %s (worker %d): %s",
+                            "Capture attempt %d/%d failed for %s (worker %d): %s",
+                            attempt,
+                            max_attempts,
                             t.target_id,
                             worker_idx,
                             exc,
@@ -1299,8 +1268,22 @@ class NetcareScraper:
                         )
                     finally:
                         with contextlib.suppress(Exception):
-                            retry_driver.quit()
+                            driver.quit()
 
+                    if sample.error is None:
+                        logger.info("Target %s succeeded on attempt %d/%d", t.target_id, attempt, max_attempts)
+                        break
+
+                    if attempt < max_attempts:
+                        logger.info(
+                            "Retrying target %s with fresh driver (attempt %d/%d, worker %d)",
+                            t.target_id,
+                            attempt + 1,
+                            max_attempts,
+                            worker_idx,
+                        )
+
+                assert sample is not None
                 samples.append(sample)
                 status_str = "ok" if sample.error is None else f"error ({sample.error})"
                 logger.info("Target %s (driver %s): %s", t.target_id, used_driver, status_str)
