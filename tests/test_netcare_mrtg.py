@@ -465,6 +465,454 @@ def test_gemini_captcha_solver_with_proxy(monkeypatch):
     monkeypatch.delenv("ALL_PROXY")
 
 
+def test_gemini_captcha_solver_rotate_on_599():
+    """Test that status 599 triggers key rotation in ROTATE_STATUS."""
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1", "key2"],
+        models=["model1", "model2"],
+    )
+
+    def mock_transport(url: str, payload: dict) -> tuple[int, dict]:
+        if "key1" in url:
+            return 599, {}  # Network timeout - should rotate
+        return 200, {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "abc"}],
+                    }
+                }
+            ]
+        }
+
+    solver._transport = mock_transport
+    code = solver.solve(b"fake_image_bytes")
+    assert code == "abc"
+    assert solver._next_key_index == 1
+
+
+def test_rotate_status_includes_599():
+    """Test that ROTATE_STATUS includes 599 for network timeout handling."""
+    from network_report.collectors.netcare_mrtg import ROTATE_STATUS
+    assert 599 in ROTATE_STATUS
+    assert ROTATE_STATUS == frozenset({429, 500, 502, 503, 504, 599})
+
+
+def test_default_timeout_seconds_is_45():
+    """Test that DEFAULT_TIMEOUT_SECONDS is 45 seconds."""
+    from network_report.collectors.netcare_mrtg import DEFAULT_TIMEOUT_SECONDS
+    assert DEFAULT_TIMEOUT_SECONDS == 45
+
+
+def test_netcare_auto_login_inpage_retry(tmp_path: Path):
+    """Test _auto_login retries up to 2 times on portal rejection."""
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        totp_secret="AAAAAAAAAAAAAAAA",
+        captcha_enabled=True,
+        captcha_api_keys=["k1"],
+    )
+
+    # Mock driver that simulates portal rejection on first attempt
+    mock_driver = MagicMock()
+    mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    # Track attempt count
+    attempt_count = 0
+
+    def mock_get(url):
+        nonlocal attempt_count
+        attempt_count += 1
+        # On second attempt, driver.get is called and we set URL to login page
+        mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_driver.get.side_effect = mock_get
+
+    # Mock elements
+    mock_uname = MagicMock()
+    mock_passw = MagicMock()
+    mock_captcha_img = MagicMock()
+    mock_captcha_input = MagicMock()
+    mock_submit = MagicMock()
+
+    def mock_find_element(by, value):
+        if value == "#uname" or "uname" in str(value):
+            return mock_uname
+        if value == "#passw" or "passw" in str(value):
+            return mock_passw
+        if "captcha-element img" in str(value):
+            return mock_captcha_img
+        if "captcha-input" in str(value):
+            return mock_captcha_input
+        if "submit" in str(value):
+            return mock_submit
+        return MagicMock()
+
+    def mock_find_elements(by, value):
+        if "agree" in str(value):
+            return []
+        if "otp" in str(value):
+            return []
+        if "submit" in str(value):
+            return [mock_submit]
+        return []
+
+    mock_driver.find_element.side_effect = mock_find_element
+    mock_driver.find_elements.side_effect = mock_find_elements
+
+    # Track submit clicks to simulate URL change after first attempt
+    submit_click_count = 0
+
+    def mock_click():
+        nonlocal submit_click_count
+        submit_click_count += 1
+        if submit_click_count == 1:
+            # First submit -> portal rejection
+            mock_driver.current_url = "https://telkomcare.example.internal/public/login/msg/"
+        else:
+            # Second submit -> success
+            mock_driver.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+    mock_submit.click.side_effect = mock_click
+
+    # Mock captcha solver
+    scraper.captcha_solver.solve = MagicMock(return_value="abc")
+
+    with patch("selenium.webdriver.support.ui.WebDriverWait") as mock_wait:
+        mock_wait_instance = MagicMock()
+        mock_wait.return_value = mock_wait_instance
+        mock_wait_instance.until.side_effect = lambda x: x(mock_driver)
+
+        result = scraper._auto_login(mock_driver)
+
+    # Should succeed on second attempt
+    assert result is True
+    assert attempt_count == 1  # driver.get only called on attempt 2
+    assert submit_click_count == 2
+    assert scraper.captcha_solver.solve.call_count == 2
+
+
+def test_netcare_auto_login_logs_warning_on_rejection(tmp_path: Path, caplog):
+    """Test _auto_login logs WARNING on portal rejection with URL."""
+    import logging
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        totp_secret="AAAAAAAAAAAAAAAA",
+        captcha_enabled=True,
+        captcha_api_keys=["k1"],
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    # Track attempt count
+    attempt_count = 0
+
+    def mock_get(url):
+        nonlocal attempt_count
+        attempt_count += 1
+        mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_driver.get.side_effect = mock_get
+
+    mock_uname = MagicMock()
+    mock_passw = MagicMock()
+    mock_captcha_img = MagicMock()
+    mock_captcha_input = MagicMock()
+    mock_submit = MagicMock()
+
+    def mock_find_element(by, value):
+        if "uname" in str(value):
+            return mock_uname
+        if "passw" in str(value):
+            return mock_passw
+        if "captcha-element img" in str(value):
+            return mock_captcha_img
+        if "captcha-input" in str(value):
+            return mock_captcha_input
+        if "submit" in str(value):
+            return mock_submit
+        return MagicMock()
+
+    def mock_find_elements(by, value):
+        if "agree" in str(value):
+            return []
+        if "otp" in str(value):
+            return []
+        if "submit" in str(value):
+            return [mock_submit]
+        return []
+
+    mock_driver.find_element.side_effect = mock_find_element
+    mock_driver.find_elements.side_effect = mock_find_elements
+
+    scraper.captcha_solver.solve = MagicMock(return_value="abc")
+
+    # Track submit clicks to simulate URL change after first attempt
+    submit_click_count = 0
+
+    def mock_click():
+        nonlocal submit_click_count
+        submit_click_count += 1
+        if submit_click_count == 1:
+            # First submit -> portal rejection
+            mock_driver.current_url = "https://telkomcare.example.internal/public/login/msg/"
+        else:
+            # Second submit -> still rejection (both attempts fail)
+            mock_driver.current_url = "https://telkomcare.example.internal/public/login/msg/"
+
+    mock_submit.click.side_effect = mock_click
+
+    with patch("selenium.webdriver.support.ui.WebDriverWait") as mock_wait:
+        mock_wait_instance = MagicMock()
+        mock_wait.return_value = mock_wait_instance
+        mock_wait_instance.until.side_effect = lambda x: x(mock_driver)
+
+        with caplog.at_level(logging.WARNING):
+            result = scraper._auto_login(mock_driver)
+
+    # Should fail after 2 attempts
+    assert result is False
+    assert attempt_count == 1  # driver.get only called on attempt 2
+    assert submit_click_count == 2
+
+    # Check warning logs for portal rejection
+    warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+    rejection_logs = [r for r in warning_logs if "rejected by portal" in r.message]
+    assert len(rejection_logs) == 2
+    for log in rejection_logs:
+        assert "attempt" in log.message
+        assert "public/login/msg" in log.message
+
+
+def test_netcare_auto_login_logs_warning_on_captcha_empty(tmp_path: Path, caplog):
+    """Test _auto_login logs WARNING when captcha solver returns empty."""
+    import logging
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        totp_secret="AAAAAAAAAAAAAAAA",
+        captcha_enabled=True,
+        captcha_api_keys=["k1"],
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_uname = MagicMock()
+    mock_passw = MagicMock()
+    mock_captcha_img = MagicMock()
+    mock_captcha_input = MagicMock()
+    mock_submit = MagicMock()
+
+    def mock_find_element(by, value):
+        if "uname" in str(value):
+            return mock_uname
+        if "passw" in str(value):
+            return mock_passw
+        if "captcha-element img" in str(value):
+            return mock_captcha_img
+        if "captcha-input" in str(value):
+            return mock_captcha_input
+        if "submit" in str(value):
+            return mock_submit
+        return MagicMock()
+
+    def mock_find_elements(by, value):
+        if "agree" in str(value):
+            return []
+        if "otp" in str(value):
+            return []
+        if "submit" in str(value):
+            return [mock_submit]
+        return []
+
+    mock_driver.find_element.side_effect = mock_find_element
+    mock_driver.find_elements.side_effect = mock_find_elements
+
+    # Captcha solver returns empty
+    scraper.captcha_solver.solve = MagicMock(return_value="")
+
+    with patch("selenium.webdriver.support.ui.WebDriverWait") as mock_wait:
+        mock_wait_instance = MagicMock()
+        mock_wait.return_value = mock_wait_instance
+        mock_wait_instance.until.side_effect = lambda x: x(mock_driver)
+
+        with caplog.at_level(logging.WARNING):
+            result = scraper._auto_login(mock_driver)
+
+    assert result is False
+
+    warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+    empty_captcha_logs = [r for r in warning_logs if "captcha solver returned empty" in r.message]
+    assert len(empty_captcha_logs) == 2  # 2 attempts
+    for log in empty_captcha_logs:
+        assert "attempt" in log.message
+
+
+def test_netcare_auto_login_logs_warning_on_non_auth_url(tmp_path: Path, caplog):
+    """Test _auto_login logs WARNING when reaching non-auth URL."""
+    import logging
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        totp_secret="AAAAAAAAAAAAAAAA",
+        captcha_enabled=True,
+        captcha_api_keys=["k1"],
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_uname = MagicMock()
+    mock_passw = MagicMock()
+    mock_captcha_img = MagicMock()
+    mock_captcha_input = MagicMock()
+    mock_submit = MagicMock()
+
+    def mock_find_element(by, value):
+        if "uname" in str(value):
+            return mock_uname
+        if "passw" in str(value):
+            return mock_passw
+        if "captcha-element img" in str(value):
+            return mock_captcha_img
+        if "captcha-input" in str(value):
+            return mock_captcha_input
+        if "submit" in str(value):
+            return mock_submit
+        return MagicMock()
+
+    def mock_find_elements(by, value):
+        if "agree" in str(value):
+            return []
+        if "otp" in str(value):
+            return []
+        if "submit" in str(value):
+            return [mock_submit]
+        return []
+
+    mock_driver.find_element.side_effect = mock_find_element
+    mock_driver.find_elements.side_effect = mock_find_elements
+
+    scraper.captcha_solver.solve = MagicMock(return_value="abc")
+
+    # Track attempt and submit clicks
+    attempt_count = 0
+    submit_click_count = 0
+
+    def mock_get(url):
+        nonlocal attempt_count
+        attempt_count += 1
+        mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_driver.get.side_effect = mock_get
+
+    def mock_click():
+        nonlocal submit_click_count
+        submit_click_count += 1
+        if submit_click_count == 1:
+            # First submit -> portal rejection
+            mock_driver.current_url = "https://telkomcare.example.internal/public/login/msg/"
+        else:
+            # Second submit -> non-auth URL (not login, not mrtgnetcare2)
+            mock_driver.current_url = "https://telkomcare.example.internal/some/other/page"
+
+    mock_submit.click.side_effect = mock_click
+
+    with patch("selenium.webdriver.support.ui.WebDriverWait") as mock_wait:
+        mock_wait_instance = MagicMock()
+        mock_wait.return_value = mock_wait_instance
+        mock_wait_instance.until.side_effect = lambda x: x(mock_driver)
+
+        with caplog.at_level(logging.WARNING):
+            result = scraper._auto_login(mock_driver)
+
+    assert result is False
+    assert attempt_count == 1  # driver.get only called on attempt 2
+    assert submit_click_count == 2
+
+    warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+    non_auth_logs = [r for r in warning_logs if "reached non-auth URL" in r.message]
+    assert len(non_auth_logs) == 1  # Only second attempt reaches non-auth URL
+    assert "attempt 2" in non_auth_logs[0].message
+
+
+def test_netcare_auto_login_logs_warning_on_exception(tmp_path: Path, caplog):
+    """Test _auto_login logs WARNING on exception during login."""
+    import logging
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        totp_secret="AAAAAAAAAAAAAAAA",
+        captcha_enabled=True,
+        captcha_api_keys=["k1"],
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.current_url = "https://telkomcare.example.internal/public/login"
+
+    mock_uname = MagicMock()
+    mock_passw = MagicMock()
+
+    def mock_find_element(by, value):
+        if "uname" in str(value):
+            return mock_uname
+        if "passw" in str(value):
+            return mock_passw
+        return MagicMock()
+
+    def mock_find_elements(by, value):
+        return []
+
+    mock_driver.find_element.side_effect = mock_find_element
+    mock_driver.find_elements.side_effect = mock_find_elements
+
+    # Raise exception on first attempt
+    attempt_count = 0
+
+    def mock_until_side_effect(x):
+        nonlocal attempt_count
+        attempt_count += 1
+        if attempt_count == 1:
+            raise Exception("Element not found")
+        return x(mock_driver)
+
+    with patch("selenium.webdriver.support.ui.WebDriverWait") as mock_wait:
+        mock_wait_instance = MagicMock()
+        mock_wait.return_value = mock_wait_instance
+        mock_wait_instance.until.side_effect = mock_until_side_effect
+
+        with caplog.at_level(logging.WARNING):
+            result = scraper._auto_login(mock_driver)
+
+    # Should retry and fail
+    assert result is False
+
+    warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+    exception_logs = [r for r in warning_logs if "failed with exception" in r.message]
+    assert len(exception_logs) >= 1
+    assert "attempt 1" in exception_logs[0].message
+    assert "Element not found" in exception_logs[0].message
+
+
 def test_netcare_scraper_capture_all(tmp_path: Path):
     scraper = NetcareScraper(
         base_url="https://telkomcare.example.internal",

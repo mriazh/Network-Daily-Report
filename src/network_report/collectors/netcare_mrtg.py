@@ -40,9 +40,9 @@ Outbound_Maximum: [value]
 Values should include units (e.g., "6.65 k", "1.82 M", "N/A").
 If a value is not visible or unclear, write "N/A" for that line."""
 
-ROTATE_STATUS = frozenset({429, 500, 502, 503, 504})
+ROTATE_STATUS = frozenset({429, 500, 502, 503, 504, 599})
 MODEL_BLACKLIST_STATUS = frozenset({404, 503})
-DEFAULT_TIMEOUT_SECONDS = 6
+DEFAULT_TIMEOUT_SECONDS = 45
 
 MRTG_ISOLATE_SCRIPT = """
 // MRTG isolate script
@@ -817,63 +817,72 @@ class NetcareScraper:
 
     def _auto_login(self, driver: Any) -> bool:
         if not self.username or not self.password:
+            logger.warning("Netcare auto-login failed: missing credentials")
             return False
 
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support import expected_conditions as EC
         from selenium.webdriver.support.ui import WebDriverWait
 
-        wait = WebDriverWait(driver, self.page_timeout_seconds)
-        login_url = self.login_url
-        driver.get(login_url)
+        max_inpage_attempts = 2
+        for attempt in range(1, max_inpage_attempts + 1):
+            wait = WebDriverWait(driver, self.page_timeout_seconds)
+            login_url = self.login_url
+            if attempt > 1 or driver.current_url != login_url:
+                driver.get(login_url)
 
-        try:
-            uname_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#uname")))
-            passw_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#passw")))
-            uname_input.clear()
-            uname_input.send_keys(self.username)
-            passw_input.clear()
-            passw_input.send_keys(self.password)
+            try:
+                uname_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#uname")))
+                passw_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#passw")))
+                uname_input.clear()
+                uname_input.send_keys(self.username)
+                passw_input.clear()
+                passw_input.send_keys(self.password)
 
-            if self.captcha_enabled:
-                captcha_elem = wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "#captcha-element img"))
-                )
-                captcha_png = captcha_elem.screenshot_as_png
-                solved = self.captcha_solver.solve(captcha_png)
-                if not solved:
-                    return False
-                captcha_input = driver.find_element(By.CSS_SELECTOR, "#captcha-input")
-                captcha_input.clear()
-                captcha_input.send_keys(solved)
+                if self.captcha_enabled:
+                    captcha_elem = wait.until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "#captcha-element img"))
+                    )
+                    captcha_png = captcha_elem.screenshot_as_png
+                    solved = self.captcha_solver.solve(captcha_png)
+                    if not solved:
+                        logger.warning("Netcare auto-login attempt %d: captcha solver returned empty", attempt)
+                        continue
+                    logger.info("Netcare auto-login attempt %d: captcha solved as '%s'", attempt, solved)
+                    captcha_input = driver.find_element(By.CSS_SELECTOR, "#captcha-input")
+                    captcha_input.clear()
+                    captcha_input.send_keys(solved)
 
-            agrees = driver.find_elements(By.CSS_SELECTOR, "#agree")
-            if agrees and not agrees[0].is_selected():
-                driver.execute_script("arguments[0].click();", agrees[0])
+                agrees = driver.find_elements(By.CSS_SELECTOR, "#agree")
+                if agrees and not agrees[0].is_selected():
+                    driver.execute_script("arguments[0].click();", agrees[0])
 
-            submits = driver.find_elements(By.CSS_SELECTOR, "#submit")
-            if submits:
-                submits[0].click()
-            time.sleep(3)
-
-            if "/public/login/msg/" in driver.current_url:
-                return False
-
-            otp_inputs = driver.find_elements(By.CSS_SELECTOR, "input[name='otp[]']")
-            if len(otp_inputs) == 6 and self.totp_secret:
-                code = pyotp.TOTP(self.totp_secret).now()
-                for idx, ch in enumerate(code):
-                    inp = otp_inputs[idx]
-                    driver.execute_script("arguments[0].removeAttribute('disabled');", inp)
-                    inp.clear()
-                    inp.send_keys(ch)
+                submits = driver.find_elements(By.CSS_SELECTOR, "#submit")
+                if submits:
+                    submits[0].click()
                 time.sleep(3)
 
-            if self._is_authenticated_url(driver.current_url):
-                self._save_cookies(driver)
-                return True
-        except Exception as exc:
-            logger.warning("Netcare auto-login failed: %s", exc)
+                if "/public/login/msg/" in driver.current_url:
+                    logger.warning("Netcare auto-login attempt %d rejected by portal: %s", attempt, driver.current_url)
+                    continue
+
+                otp_inputs = driver.find_elements(By.CSS_SELECTOR, "input[name='otp[]']")
+                if len(otp_inputs) == 6 and self.totp_secret:
+                    code = pyotp.TOTP(self.totp_secret).now()
+                    for idx, ch in enumerate(code):
+                        inp = otp_inputs[idx]
+                        driver.execute_script("arguments[0].removeAttribute('disabled');", inp)
+                        inp.clear()
+                        inp.send_keys(ch)
+                    time.sleep(3)
+
+                if self._is_authenticated_url(driver.current_url):
+                    self._save_cookies(driver)
+                    return True
+                else:
+                    logger.warning("Netcare auto-login attempt %d reached non-auth URL: %s", attempt, driver.current_url)
+            except Exception as exc:
+                logger.warning("Netcare auto-login attempt %d failed with exception: %s", attempt, exc)
 
         return False
 
