@@ -270,21 +270,27 @@ def resolve_netcare_target(identifier: str) -> tuple[str, str]:
         return ("title", clean_id.split("-", 1)[1])
     if _SID_PATTERN.match(clean_id):
         return ("sid", clean_id)
-    if clean_id.isdigit():
-        if clean_id in BARE_NUMERIC_TITLE_IDS:
-            return ("title", clean_id)
-        return ("sid", clean_id)
+    if clean_id.isdigit() and len(clean_id) <= 6:
+        return ("title", clean_id)
     return ("sid", clean_id)
 
 
 def build_targets_from_circuits(circuits: dict) -> list[MrtgTarget]:
+    title_ids = set(circuits.get("title_ids", []))
     targets: list[MrtgTarget] = []
     for group_key in ("astinet", "metro_e", "vpn_ip_osa"):
         for entry in circuits.get(group_key, []):
             if isinstance(entry, (list, tuple)) and len(entry) >= 2:
                 name = str(entry[0]).strip()
                 raw_id = str(entry[1]).strip()
-                kind, target_id = resolve_netcare_target(raw_id)
+                if len(entry) >= 4 and str(entry[3]).strip() in ("title", "sid"):
+                    kind = str(entry[3]).strip()
+                    target_id = raw_id
+                elif raw_id in title_ids:
+                    kind = "title"
+                    target_id = raw_id
+                else:
+                    kind, target_id = resolve_netcare_target(raw_id)
                 targets.append(MrtgTarget(target_id=target_id, kind=kind, name=name))
     return targets
 
@@ -1031,9 +1037,16 @@ class NetcareScraper:
                 )
             time.sleep(2)
 
-            btn_graphs = driver.find_elements(By.CSS_SELECTOR, "a.btn-graph")
-            if btn_graphs:
-                driver.execute_script("arguments[0].click();", btn_graphs[0])
+            if target.kind == "title":
+                try:
+                    btn_graph = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.btn-graph, .btn-graph")))
+                    driver.execute_script("arguments[0].click();", btn_graph)
+                except Exception:
+                    pass
+            else:
+                btn_graphs = driver.find_elements(By.CSS_SELECTOR, "a.btn-graph")
+                if btn_graphs:
+                    driver.execute_script("arguments[0].click();", btn_graphs[0])
             time.sleep(2)
 
             self._check_session(driver)

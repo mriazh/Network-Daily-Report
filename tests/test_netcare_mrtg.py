@@ -150,8 +150,11 @@ def test_resolve_netcare_target():
         ("1000001-0020265222", ("sid", "1000001-0020265222")),
         ("1708594346", ("sid", "1708594346")),
         ("1708594520", ("sid", "1708594520")),
-        ("1001", ("sid", "1001")),
-        ("1002", ("sid", "1002")),
+        ("3784", ("title", "3784")),
+        ("3598", ("title", "3598")),
+        ("1001", ("title", "1001")),
+        ("1002", ("title", "1002")),
+        ("123456", ("title", "123456")),
         ("2000000001", ("sid", "2000000001")),
         ("2000000002", ("sid", "2000000002")),
     ]
@@ -208,15 +211,57 @@ def test_build_targets_from_circuits():
     assert MrtgTarget(target_id="1708594520", kind="sid", name="UPG Ruko") in targets
     assert MrtgTarget(target_id="1708594346", kind="sid", name="CORP - UPG Ruko Makassar") in targets
 
-    # Bare numeric IDs now resolve as SID (not in BARE_NUMERIC_TITLE_IDS)
-    assert MrtgTarget(target_id="1001", kind="sid", name="CORP CGK - PARTNER-DC") in targets
-    assert MrtgTarget(target_id="1002", kind="sid", name="PARTNER-DC - CORP CGK") in targets
+    # Bare numeric IDs now resolve as title (<= 6 digits)
+    assert MrtgTarget(target_id="1001", kind="title", name="CORP CGK - PARTNER-DC") in targets
+    assert MrtgTarget(target_id="1002", kind="title", name="PARTNER-DC - CORP CGK") in targets
     assert MrtgTarget(target_id="2000000001", kind="sid", name="CGK T1C") in targets
     assert MrtgTarget(target_id="2000000002", kind="sid", name="CGK T3 G.69") in targets
 
-    # Overall kind counts: 15 SIDs, 2 titles (bare numerics now resolve as SID)
-    assert sum(1 for t in targets if t.kind == "sid") == 15
-    assert sum(1 for t in targets if t.kind == "title") == 2
+    # Overall kind counts: 13 SIDs, 4 titles (1001, 1002, 4000-..., 3034-...)
+    assert sum(1 for t in targets if t.kind == "sid") == 13
+    assert sum(1 for t in targets if t.kind == "title") == 4
+
+
+def test_build_targets_from_circuits_with_title_ids_and_explicit_kind():
+    """Test that title_ids from config and explicit 4th element 'title'/'sid' are respected."""
+    circuits_with_config = {
+        "title_ids": ["3784", "3598", "999999"],
+        "astinet": [
+            ["Link A", "3784", "10 MB"],  # in title_ids -> title
+            ["Link B", "3598", "10 MB"],  # in title_ids -> title
+            ["Link C", "999999", "10 MB"],  # in title_ids -> title
+            ["Link D", "12345", "10 MB"],  # <=6 digits but not in title_ids -> title (by resolve_netcare_target)
+            ["Link E", "1000001-0000000001", "1 GB"],  # standard SID
+        ],
+        "metro_e": [
+            ["Link F", "4000-1000000001", "4 MB"],  # 4-10 pattern -> title
+            ["Link G", "5000-2000000001", "4 MB", "sid"],  # explicit sid override
+            ["Link H", "6000-3000000001", "4 MB", "title"],  # explicit title
+        ],
+        "vpn_ip_osa": [
+            ["Link I", "1708594520", "6 MB"],  # standard SID
+        ],
+    }
+
+    targets = build_targets_from_circuits(circuits_with_config)
+    target_map = {t.target_id: t for t in targets}
+
+    # title_ids config takes precedence
+    assert target_map["3784"].kind == "title"
+    assert target_map["3598"].kind == "title"
+    assert target_map["999999"].kind == "title"
+
+    # resolve_netcare_target rule for <=6 digits
+    assert target_map["12345"].kind == "title"
+
+    # Explicit 4th element override (target_id stays as raw_id when explicitly set)
+    assert target_map["5000-2000000001"].kind == "sid"  # explicit sid
+    assert target_map["6000-3000000001"].kind == "title"  # explicit title
+
+    # Standard patterns
+    assert target_map["1000001-0000000001"].kind == "sid"
+    assert target_map["1000000001"].kind == "title"  # 4000-1000000001 -> title
+    assert target_map["1708594520"].kind == "sid"
 
 
 def test_mocked_legend_extraction_paddle(tmp_path: Path):
