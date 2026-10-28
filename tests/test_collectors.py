@@ -227,6 +227,7 @@ def test_wag_formatter():
             "outdoor_fault": 0,
             "fault_names": [],
             "ssid_distribution": {"Staff": 1000},
+            "is_snapshot_1400": True,
         },
         "orbit": [],
         "highlights": {"problem_open": "N/A"},
@@ -1502,3 +1503,13 @@ def test_iot_summary_mtd_accumulation_sums_daily_and_ignores_missing_day(
     summary_mrtg = iot_mrtg.collect_iot_summary(raw_dir, "2026-10-04", mapping_file)
     assert summary_mrtg is not None
     assert dict(summary_mrtg.top_periodic) == {"SITE-A": 4.5, "SITE-B": 3.5}
+
+
+def test_wag_formatter_live_header():
+    payload = {
+        "date_str": "12 Oktober 2026",
+        "ap": {"is_snapshot_1400": False, "normal": 1, "fault": 0, "users": 2, "indoor_ok": 1, "outdoor_ok": 0, "outdoor_fault": 0, "fault_names": [], "ssid_distribution": {}},
+    }
+    from network_report.writers.wag_formatter import format_whatsapp_report
+    msg = format_whatsapp_report(payload)
+    assert "*D. 📶 AP Huawei (Live - Data 14.00 WIB Kosong)*" in msg

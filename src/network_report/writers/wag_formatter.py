@@ -237,7 +237,7 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
             f"  b. Memori: {payload.get('analysis_mem', 'Alokasi stabil.')}",
             "",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            "*D. 📶 AP Huawei (Data: 14.00 WIB)*",
+            f"*D. 📶 AP Huawei ({ap.get('source_tag') or ('Data: 14.00 WIB' if ap.get('is_snapshot_1400') else 'Live - Data 14.00 WIB Kosong')})*",
             "",
             "1. Status Connectivity",
             f"  a. Normal → 🟢 {ap.get('normal', 454)}",

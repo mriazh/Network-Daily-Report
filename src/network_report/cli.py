@@ -392,6 +392,14 @@ def main(argv: list[str] | None = None) -> int:
 
             duration = time.time() - start_time
 
+            # Save 14:00 WIB snapshot marker on success
+            marker_path = cfg.output_raw_root / "huawei_ap" / date_compact / "snapshot_1400.json"
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text(
+                json.dumps({"sampled_at": datetime.now().isoformat(), "source": "14:00 WIB"}, indent=2),
+                encoding="utf-8",
+            )
+
             if huawei_ap_data:
                 normal = huawei_ap_data.normal_count
                 fault = huawei_ap_data.fault_count

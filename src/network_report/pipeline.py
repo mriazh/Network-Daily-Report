@@ -307,6 +307,19 @@ def _archive_raw_artifacts(
     )
 
 
+def is_1400_snapshot(ap_file: "Path") -> bool:
+    """Return True if apInfo.csv originates from the 14:00 WIB peak-hour snapshot."""
+    from datetime import datetime as _dt
+
+    if not ap_file.exists() or ap_file.stat().st_size == 0:
+        return False
+    marker = ap_file.parent / "snapshot_1400.json"
+    if marker.exists():
+        return True
+    mtime = _dt.fromtimestamp(ap_file.stat().st_mtime)
+    return 13 <= mtime.hour <= 16
+
+
 def run_daily_pipeline(
     date_input: str = "today", send_wa: bool = False, test_mode: bool = False
 ) -> dict:
@@ -470,11 +483,13 @@ def run_daily_pipeline(
         # Huawei NCE (AP, SSID, WAC) & AP processing
         huawei_ap_data: HuaweiApData | None = None
         wac_status: WacStatus | None = None
+        is_snapshot_1400: bool = False
         if cfg.huawei.enabled:
             # Check if 14:00 WIB peak hour AP snapshot already exists (non-empty apInfo.csv)
             ap_1400_file = cfg.output_raw_root / "huawei_ap" / date_compact / "apInfo.csv"
             if ap_1400_file.exists() and ap_1400_file.stat().st_size > 0:
                 logger.info("Using existing 14:00 WIB peak hour AP snapshot from %s", ap_1400_file)
+                is_snapshot_1400 = is_1400_snapshot(ap_1400_file)
                 huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
                 # Try to load WAC status from today's cache
                 wac_saved = cfg.output_root / "raw" / "wac" / date_compact / "wac_status.json"
@@ -724,6 +739,7 @@ def run_daily_pipeline(
                 "total": prtg_status.total if prtg_status else 127,
             },
             "ap": {
+                "is_snapshot_1400": is_snapshot_1400,
                 "normal": huawei_ap_data.normal_count if huawei_ap_data else 454,
                 "fault": huawei_ap_data.fault_count if huawei_ap_data else 0,
                 "users": huawei_ap_data.total_users if huawei_ap_data else 0,
