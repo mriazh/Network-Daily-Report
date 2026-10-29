@@ -485,13 +485,13 @@ def run_daily_pipeline(
         wac_status: WacStatus | None = None
         is_snapshot_1400: bool = False
         if cfg.huawei.enabled:
-            # Check if 14:00 WIB peak hour AP snapshot already exists (non-empty apInfo.csv)
             ap_1400_file = cfg.output_raw_root / "huawei_ap" / date_compact / "apInfo.csv"
-            if ap_1400_file.exists() and ap_1400_file.stat().st_size > 0:
-                logger.info("Using existing 14:00 WIB peak hour AP snapshot from %s", ap_1400_file)
-                is_snapshot_1400 = is_1400_snapshot(ap_1400_file)
+            # Genuine 14:00 snapshot exists
+            if is_1400_snapshot(ap_1400_file):
+                logger.info("Using genuine 14:00 WIB peak hour AP snapshot from %s", ap_1400_file)
+                is_snapshot_1400 = True
                 huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
-                # Try to load WAC status from today's cache
+                # Load WAC status from today's cache if present
                 wac_saved = cfg.output_root / "raw" / "wac" / date_compact / "wac_status.json"
                 if wac_saved.exists():
                     try:
@@ -499,10 +499,7 @@ def run_daily_pipeline(
                         wac_status = WacStatus(**w_dict)
                     except Exception:
                         pass
-
-                # FALLBACK 1: If wac_status is still None, trigger NceCollector live to fetch WAC
                 if not wac_status:
-                    logger.info("WAC status not found in cache for %s; collecting live from NceCollector...", date_compact)
                     try:
                         selectors = {
                             "login_username": cfg.huawei.sel_login_username,
@@ -527,24 +524,12 @@ def run_daily_pipeline(
                         collector.close()
                         if nce_export.wac:
                             wac_status = nce_export.wac
-                            logger.info("Successfully collected live WAC status from NceCollector")
                     except Exception as e:
                         logger.error("Error executing NceCollector for live WAC fallback: %s", e)
-
-                # FALLBACK 2: If live collection failed, search for most recent past wac_status.json
-                if not wac_status:
-                    logger.info("Live WAC collection failed; searching for most recent past wac_status.json...")
-                    past_wac_files = sorted(cfg.output_root.glob("raw/wac/*/wac_status.json"), reverse=True)
-                    for past_wac in past_wac_files:
-                        try:
-                            w_dict = json.loads(past_wac.read_text(encoding="utf-8"))
-                            wac_status = WacStatus(**w_dict)
-                            logger.info("Fell back to past WAC status from %s", past_wac)
-                            break
-                        except Exception:
-                            continue
             else:
-                # No 14:00 snapshot, run NceCollector to get fresh data
+                # No genuine 14:00 snapshot -> run NceCollector LIVE
+                logger.info("No genuine 14:00 WIB snapshot found; fetching LIVE AP & WAC data from NceCollector...")
+                is_snapshot_1400 = False
                 try:
                     selectors = {
                         "login_username": cfg.huawei.sel_login_username,
@@ -570,31 +555,9 @@ def run_daily_pipeline(
                     if nce_export.wac:
                         wac_status = nce_export.wac
                 except Exception as e:
-                    logger.error("Error executing NceCollector: %s", e)
+                    logger.error("Error executing NceCollector for live data: %s", e)
 
-                # If NceCollector failed or produced no WAC, try today's cache
-                if not wac_status:
-                    wac_saved = cfg.output_root / "raw" / "wac" / date_compact / "wac_status.json"
-                    if wac_saved.exists():
-                        try:
-                            w_dict = json.loads(wac_saved.read_text(encoding="utf-8"))
-                            wac_status = WacStatus(**w_dict)
-                        except Exception:
-                            pass
-
-                # FALLBACK 3: If still no WAC, search for most recent past wac_status.json
-                if not wac_status:
-                    logger.info("No WAC status from NceCollector or today's cache; searching for most recent past wac_status.json...")
-                    past_wac_files = sorted(cfg.output_root.glob("raw/wac/*/wac_status.json"), reverse=True)
-                    for past_wac in past_wac_files:
-                        try:
-                            w_dict = json.loads(past_wac.read_text(encoding="utf-8"))
-                            wac_status = WacStatus(**w_dict)
-                            logger.info("Fell back to past WAC status from %s", past_wac)
-                            break
-                        except Exception:
-                            continue
-
+                # Parse the freshly downloaded live AP data
                 huawei_ap_data = collect_huawei_ap_data(cfg.huawei.raw_dir, date_compact)
 
         # Orbit Modems
