@@ -232,6 +232,9 @@ _PADDLE_VENV_GLOBS = (
 
 _DROPPED_COOKIE_KEYS = ("sameSite", "storeId", "hostOnly", "session", "expirySource")
 
+_PADDLE_LOCK = threading.Lock()
+_CACHED_PADDLE_INTERPRETER: Path | None = None
+
 
 @dataclass
 class MrtgTarget:
@@ -490,24 +493,59 @@ class LegendExtractor:
             "Outbound_Average": None,
             "Outbound_Maximum": None,
         }
-        for python_exe in self._paddle_interpreters():
+        global _CACHED_PADDLE_INTERPRETER
+
+        # Prefer the cached working interpreter to avoid rescanning venvs.
+        if _CACHED_PADDLE_INTERPRETER is not None:
+            interpreters = [Path(_CACHED_PADDLE_INTERPRETER)]
+        else:
+            interpreters = list(self._paddle_interpreters())
+
+        for python_exe in interpreters:
             cmd = [str(python_exe), "-c", _PADDLE_SCRIPT, str(image_path)]
             try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                    stdin=subprocess.DEVNULL,
-                )
+                with _PADDLE_LOCK:
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        check=False,
+                        stdin=subprocess.DEVNULL,
+                    )
             except Exception:
                 continue
             if proc.returncode == 0 and proc.stdout:
                 lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
                 parsed = self._parse_legend_lines(lines)
                 if any(v is not None for v in parsed.values()):
+                    _CACHED_PADDLE_INTERPRETER = Path(python_exe)
                     return parsed
+
+        # If the cached interpreter failed, fall back to a full probe once.
+        if _CACHED_PADDLE_INTERPRETER is not None:
+            _CACHED_PADDLE_INTERPRETER = None
+            for python_exe in self._paddle_interpreters():
+                cmd = [str(python_exe), "-c", _PADDLE_SCRIPT, str(image_path)]
+                try:
+                    with _PADDLE_LOCK:
+                        proc = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                            check=False,
+                            stdin=subprocess.DEVNULL,
+                        )
+                except Exception:
+                    continue
+                if proc.returncode == 0 and proc.stdout:
+                    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                    parsed = self._parse_legend_lines(lines)
+                    if any(v is not None for v in parsed.values()):
+                        _CACHED_PADDLE_INTERPRETER = Path(python_exe)
+                        return parsed
+
         return result
 
     @staticmethod
@@ -1348,6 +1386,20 @@ class NetcareScraper:
             results_map.get(t.target_id, MrtgSample(target_id=t.target_id, error="not_captured"))
             for t in targets
         ]
+
+        # Post-capture pass: ensure no captured screenshot is left unparsed.
+        for s in ordered_samples:
+            if s.image_path and Path(s.image_path).exists() and not (s.inbound_maximum or s.outbound_maximum):
+                logger.info("Post-capture extraction pass for %s...", s.target_id)
+                vals = self.legend_extractor.extract(Path(s.image_path))
+                if vals.get("Inbound_Maximum") or vals.get("Outbound_Maximum"):
+                    s.inbound_current = vals.get("Inbound_Current")
+                    s.inbound_average = vals.get("Inbound_Average")
+                    s.inbound_maximum = vals.get("Inbound_Maximum")
+                    s.outbound_current = vals.get("Outbound_Current")
+                    s.outbound_average = vals.get("Outbound_Average")
+                    s.outbound_maximum = vals.get("Outbound_Maximum")
+                    s.error = None
 
         values_json: dict[str, Any] = {}
         for s in ordered_samples:

@@ -153,6 +153,57 @@ def load_mrtg_ocr_data(
     except Exception as exc:
         logger.warning("Failed reading MRTG values from %s: %s", target_file, exc)
 
+    # On-disk PNG auto-recovery: re-extract circuits that still have no values
+    # whenever their screenshot exists on disk.
+    raw_dir = report_root / date_compact
+    if raw_dir.is_dir():
+        recovered_any = False
+        try:
+            payload = json.loads(target_file.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            for sid, speeds in list(results.items()):
+                if (speeds.get("in_mbps") is None or speeds.get("in_mbps") == 0) and (
+                    speeds.get("out_mbps") is None or speeds.get("out_mbps") == 0
+                ):
+                    img_path = raw_dir / f"MRTG_{sid}_{date_compact}.png"
+                    if img_path.is_file():
+                        try:
+                            from .netcare_mrtg import LegendExtractor
+
+                            logger.info("Recovering missing MRTG values from disk image %s", img_path)
+                            recovered = LegendExtractor().extract(img_path)
+                            if recovered.get("Inbound_Maximum") or recovered.get("Outbound_Maximum"):
+                                speeds["in_mbps"] = parse_mrtg_speed_mbps(
+                                    recovered.get("Inbound_Maximum")
+                                )
+                                speeds["out_mbps"] = parse_mrtg_speed_mbps(
+                                    recovered.get("Outbound_Maximum")
+                                )
+                                entry = payload.get(sid)
+                                if isinstance(entry, dict):
+                                    for key in (
+                                        "Inbound_Current",
+                                        "Inbound_Average",
+                                        "Inbound_Maximum",
+                                        "Outbound_Current",
+                                        "Outbound_Average",
+                                        "Outbound_Maximum",
+                                    ):
+                                        if recovered.get(key) is not None:
+                                            entry[key] = recovered.get(key)
+                                recovered_any = True
+                        except Exception as exc:
+                            logger.warning("Failed recovering MRTG values from %s: %s", img_path, exc)
+            if recovered_any:
+                try:
+                    target_file.write_text(
+                        json.dumps(payload, indent=2), encoding="utf-8"
+                    )
+                except Exception as exc:
+                    logger.warning("Failed updating MRTG values JSON %s: %s", target_file, exc)
+
     return results
 
 

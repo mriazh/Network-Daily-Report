@@ -2398,3 +2398,340 @@ def test_login_cookie_reuse_branch_url_no_doubled_mrtgnetcare2(tmp_path: Path):
         assert url.count("/mrtgnetcare2") == 1
         assert "/mrtgnetcare2/mrtgnetcare2" not in url
         assert url == "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+# appended marker
+
+
+def test_load_mrtg_ocr_data_recovers_from_ondisk_png_when_speeds_none(tmp_path: Path):
+    import json
+    from unittest.mock import patch
+
+    date_compact = "20261022"
+    raw_dir = tmp_path / date_compact
+    raw_dir.mkdir(parents=True)
+    sid = "1000001-0000000001"
+    (raw_dir / f"MRTG_{sid}_{date_compact}.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    json_path = raw_dir / f"mrtg_values_{date_compact}.json"
+    json_path.write_text(
+        json.dumps({sid: {"Inbound_Maximum": None, "Outbound_Maximum": None}}),
+        encoding="utf-8",
+    )
+
+    recovered = {
+        "Inbound_Current": "1.0 M",
+        "Inbound_Average": "2.0 M",
+        "Inbound_Maximum": "3.0 M",
+        "Outbound_Current": "4.0 M",
+        "Outbound_Average": "5.0 M",
+        "Outbound_Maximum": "6.0 M",
+    }
+    with patch("network_report.collectors.netcare_mrtg.LegendExtractor") as mock_le:
+        mock_le.return_value.extract.return_value = recovered
+        loaded = load_mrtg_ocr_data(tmp_path, date_compact)
+
+    assert loaded[sid]["in_mbps"] == 3.0
+    assert loaded[sid]["out_mbps"] == 6.0
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved[sid]["Inbound_Maximum"] == "3.0 M"
+    assert saved[sid]["Outbound_Maximum"] == "6.0 M"
+
+
+def test_load_mrtg_ocr_data_recovers_from_ondisk_png_when_speeds_zero(tmp_path: Path):
+    import json
+    from unittest.mock import patch
+
+    date_compact = "20261022"
+    raw_dir = tmp_path / date_compact
+    raw_dir.mkdir(parents=True)
+    sid = "1000001-0000000001"
+    (raw_dir / f"MRTG_{sid}_{date_compact}.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    json_path = raw_dir / f"mrtg_values_{date_compact}.json"
+    json_path.write_text(
+        json.dumps({sid: {"Inbound_Maximum": "0 M", "Outbound_Maximum": "0.00 k"}}),
+        encoding="utf-8",
+    )
+
+    recovered = {
+        "Inbound_Current": "1.0 M",
+        "Inbound_Average": "2.0 M",
+        "Inbound_Maximum": "3.0 M",
+        "Outbound_Current": "4.0 M",
+        "Outbound_Average": "5.0 M",
+        "Outbound_Maximum": "6.0 M",
+    }
+    with patch("network_report.collectors.netcare_mrtg.LegendExtractor") as mock_le:
+        mock_le.return_value.extract.return_value = recovered
+        loaded = load_mrtg_ocr_data(tmp_path, date_compact)
+
+    assert loaded[sid]["in_mbps"] == 3.0
+    assert loaded[sid]["out_mbps"] == 6.0
+
+
+def test_load_mrtg_ocr_data_no_recovery_without_png(tmp_path: Path):
+    import json
+    from unittest.mock import patch
+
+    date_compact = "20261022"
+    raw_dir = tmp_path / date_compact
+    raw_dir.mkdir(parents=True)
+    sid = "1000001-0000000001"
+    json_path = raw_dir / f"mrtg_values_{date_compact}.json"
+    json_path.write_text(
+        json.dumps({sid: {"Inbound_Maximum": "0 M", "Outbound_Maximum": "0 M"}}),
+        encoding="utf-8",
+    )
+
+    with patch("network_report.collectors.netcare_mrtg.LegendExtractor") as mock_le:
+        loaded = load_mrtg_ocr_data(tmp_path, date_compact)
+
+    assert loaded[sid]["in_mbps"] == 0.0
+    assert loaded[sid]["out_mbps"] == 0.0
+    assert mock_le.call_count == 0
+
+
+def test_legend_extractor_paddle_cache_hit_uses_cached_interpreter(tmp_path: Path, monkeypatch):
+    import network_report.collectors.netcare_mrtg as mod
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    fake_img = tmp_path / "img.png"
+    fake_img.write_bytes(b"x")
+    cached = Path("/cached/python")
+    monkeypatch.setattr(mod, "_CACHED_PADDLE_INTERPRETER", cached)
+
+    extractor = LegendExtractor()
+    paddle_output = (
+        "Inbound\n"
+        "Max : 25.40 M\n"
+        "Average : 8.15 M\n"
+        "Current : 12.31 M\n"
+        "Outbound\n"
+        "Max : 10.05 M\n"
+        "Average : 3.10 M\n"
+        "Current : 4.12 M\n"
+    )
+
+    called_cmds: list[list[str]] = []
+    lock_states: list[bool] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        called_cmds.append(list(cmd))
+        lock_states.append(mod._PADDLE_LOCK.locked())
+        return MagicMock(returncode=0, stdout=paddle_output)
+
+    with (
+        patch.object(extractor, "_paddle_interpreters", return_value=[Path("/other/python")]),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
+        res = extractor._extract_paddle(fake_img)
+
+    assert called_cmds and called_cmds[0][0] == str(cached)
+    assert lock_states == [True]
+    assert mod._CACHED_PADDLE_INTERPRETER == cached
+    assert res["Inbound_Maximum"] == "25.40 M"
+    assert res["Outbound_Maximum"] == "10.05 M"
+
+
+def test_legend_extractor_paddle_cache_populated_on_success(tmp_path: Path, monkeypatch):
+    import network_report.collectors.netcare_mrtg as mod
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    fake_img = tmp_path / "img.png"
+    fake_img.write_bytes(b"x")
+    monkeypatch.setattr(mod, "_CACHED_PADDLE_INTERPRETER", None)
+
+    interp = Path("/probe/python")
+    extractor = LegendExtractor()
+    paddle_output = (
+        "Inbound\n"
+        "Max : 25.40 M\n"
+        "Average : 8.15 M\n"
+        "Current : 12.31 M\n"
+        "Outbound\n"
+        "Max : 10.05 M\n"
+        "Average : 3.10 M\n"
+        "Current : 4.12 M\n"
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        return MagicMock(returncode=0, stdout=paddle_output)
+
+    with (
+        patch.object(extractor, "_paddle_interpreters", return_value=[interp]),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
+        res = extractor._extract_paddle(fake_img)
+
+    assert mod._CACHED_PADDLE_INTERPRETER == interp
+    assert res["Inbound_Maximum"] == "25.40 M"
+
+
+def test_legend_extractor_paddle_cache_cleared_on_cached_failure(tmp_path: Path, monkeypatch):
+    import network_report.collectors.netcare_mrtg as mod
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+
+    fake_img = tmp_path / "img.png"
+    fake_img.write_bytes(b"x")
+    cached = Path("/bad/python")
+    monkeypatch.setattr(mod, "_CACHED_PADDLE_INTERPRETER", cached)
+
+    interp = Path("/good/python")
+    extractor = LegendExtractor()
+    paddle_output = (
+        "Inbound\n"
+        "Max : 25.40 M\n"
+        "Average : 8.15 M\n"
+        "Current : 12.31 M\n"
+        "Outbound\n"
+        "Max : 10.05 M\n"
+        "Average : 3.10 M\n"
+        "Current : 4.12 M\n"
+    )
+
+    call_count = {"n": 0}
+
+    def fake_run(cmd, *args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return MagicMock(returncode=1, stdout="")
+        return MagicMock(returncode=0, stdout=paddle_output)
+
+    with (
+        patch.object(extractor, "_paddle_interpreters", return_value=[interp]),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
+        res = extractor._extract_paddle(fake_img)
+
+    assert call_count["n"] == 2
+    assert mod._CACHED_PADDLE_INTERPRETER == interp
+    assert res["Inbound_Maximum"] == "25.40 M"
+
+
+def test_legend_extractor_paddle_lock_serializes_concurrent_calls(tmp_path: Path, monkeypatch):
+    import network_report.collectors.netcare_mrtg as mod
+    import time
+    from pathlib import Path
+    from concurrent.futures import ThreadPoolExecutor
+    from unittest.mock import MagicMock, patch
+
+    fake_img = tmp_path / "img.png"
+    fake_img.write_bytes(b"x")
+    monkeypatch.setattr(mod, "_CACHED_PADDLE_INTERPRETER", None)
+
+    interp = Path("/probe/python")
+    extractor = LegendExtractor()
+    paddle_output = (
+        "Inbound\n"
+        "Max : 25.40 M\n"
+        "Average : 8.15 M\n"
+        "Current : 12.31 M\n"
+        "Outbound\n"
+        "Max : 10.05 M\n"
+        "Average : 3.10 M\n"
+        "Current : 4.12 M\n"
+    )
+
+    current = {"n": 0}
+    max_concurrent = {"n": 0}
+
+    def fake_run(cmd, *args, **kwargs):
+        current["n"] += 1
+        max_concurrent["n"] = max(max_concurrent["n"], current["n"])
+        time.sleep(0.05)
+        current["n"] -= 1
+        return MagicMock(returncode=0, stdout=paddle_output)
+
+    with (
+        patch.object(extractor, "_paddle_interpreters", return_value=[interp]),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(extractor._extract_paddle, fake_img)
+            f2 = pool.submit(extractor._extract_paddle, fake_img)
+            f1.result()
+            f2.result()
+
+    assert max_concurrent["n"] == 1
+
+
+def test_capture_all_post_capture_reextracts_samples_with_image_but_no_speeds(tmp_path: Path):
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        workers=1,
+    )
+
+    def mock_capture(t, d, driver=None, output_dir=None):
+        p = output_dir / f"MRTG_{t.target_id}_{d.strftime('%Y%m%d')}.png"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return MrtgSample(target_id=t.target_id, image_path=p)
+
+    scraper.legend_extractor = MagicMock()
+    scraper.legend_extractor.extract.return_value = {
+        "Inbound_Current": "1 M",
+        "Inbound_Average": "2 M",
+        "Inbound_Maximum": "3 M",
+        "Outbound_Current": "4 M",
+        "Outbound_Average": "5 M",
+        "Outbound_Maximum": "6 M",
+    }
+
+    targets = [MrtgTarget(target_id="SID-1", kind="sid", name="Link 1")]
+    target_date = date(2026, 10, 22)
+
+    with (
+        patch.object(scraper, "_create_driver", return_value=MagicMock()),
+        patch.object(scraper, "login", return_value=True),
+        patch.object(scraper, "_apply_cached_session", return_value=True),
+        patch.object(scraper, "capture", side_effect=mock_capture),
+    ):
+        samples = scraper.capture_all(targets, target_date, output_dir=tmp_path / "out")
+
+    assert len(samples) == 1
+    s = samples[0]
+    assert s.inbound_maximum == "3 M"
+    assert s.outbound_maximum == "6 M"
+    assert s.error is None
+    assert scraper.legend_extractor.extract.called
+
+
+def test_capture_all_skips_post_capture_when_speeds_present(tmp_path: Path):
+    from unittest.mock import MagicMock, patch
+
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        workers=1,
+    )
+
+    def mock_capture(t, d, driver=None, output_dir=None):
+        p = output_dir / f"MRTG_{t.target_id}_{d.strftime('%Y%m%d')}.png"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return MrtgSample(
+            target_id=t.target_id,
+            inbound_maximum="10 M",
+            outbound_maximum="5 M",
+            image_path=p,
+        )
+
+    scraper.legend_extractor = MagicMock()
+
+    targets = [MrtgTarget(target_id="SID-2", kind="sid", name="Link 2")]
+    target_date = date(2026, 10, 22)
+
+    with (
+        patch.object(scraper, "_create_driver", return_value=MagicMock()),
+        patch.object(scraper, "login", return_value=True),
+        patch.object(scraper, "_apply_cached_session", return_value=True),
+        patch.object(scraper, "capture", side_effect=mock_capture),
+    ):
+        samples = scraper.capture_all(targets, target_date, output_dir=tmp_path / "out2")
+
+    assert len(samples) == 1
+    assert samples[0].inbound_maximum == "10 M"
+    assert not scraper.legend_extractor.extract.called
+
