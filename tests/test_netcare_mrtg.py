@@ -351,6 +351,8 @@ def test_mocked_legend_extraction_gemini_fallback(tmp_path: Path):
 
 def test_legend_extractor_proxy_support(monkeypatch):
     """Test that LegendExtractor accepts proxy configuration and builds ProxyHandler."""
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+    monkeypatch.delenv("NETCARE_CAPTCHA_PROXY", raising=False)
     # Test without proxy
     extractor = LegendExtractor()
     assert extractor._proxy is None
@@ -418,6 +420,8 @@ def test_gemini_captcha_solver_transport_default():
 
 def test_gemini_captcha_solver_with_proxy(monkeypatch):
     """Test that GeminiCaptchaSolver accepts proxy configuration and builds ProxyHandler."""
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+    monkeypatch.delenv("NETCARE_CAPTCHA_PROXY", raising=False)
     # Test without proxy
     solver = GeminiCaptchaSolver(
         api_keys=["key1"],
