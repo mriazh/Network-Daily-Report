@@ -2943,3 +2943,56 @@ def test_capture_all_fast_fails_on_portal_error_500(tmp_path: Path):
     # Only the shared driver was created.
     assert driver_creations["n"] == 1
 
+
+def test_capture_all_fast_fail_writes_error_json(tmp_path: Path):
+    """Fast-fail round still writes mrtg_values JSON recording portal_down_500."""
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        workers=2,
+    )
+
+    shared_driver = MagicMock()
+    shared_driver.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+    def mock_create_driver(profile_subpath=None):
+        return shared_driver
+
+    targets = [
+        MrtgTarget(target_id="SID-1", kind="sid", name="Link 1"),
+        MrtgTarget(target_id="SID-2", kind="sid", name="Link 2"),
+    ]
+    target_date = date(2026, 10, 22)
+    out_dir = tmp_path / "out"
+
+    with (
+        patch.object(scraper, "_create_driver", side_effect=mock_create_driver),
+        patch.object(scraper, "login", return_value=True),
+        patch.object(
+            NetcareScraper, "_is_portal_error_rendered", return_value=True
+        ),
+        patch.object(scraper, "capture") as mock_cap,
+    ):
+        samples = scraper.capture_all(targets, target_date, output_dir=out_dir)
+
+    assert len(samples) == 2
+    assert all(s.error == "portal_down_500" for s in samples)
+    assert mock_cap.call_count == 0
+
+    json_file = out_dir / "mrtg_values_20261022.json"
+    assert json_file.exists()
+    saved = json.loads(json_file.read_text(encoding="utf-8"))
+    assert set(saved.keys()) == {"SID-1", "SID-2"}
+    for sid in ("SID-1", "SID-2"):
+        assert saved[sid] == {
+            "Inbound_Current": None,
+            "Inbound_Average": None,
+            "Inbound_Maximum": None,
+            "Outbound_Current": None,
+            "Outbound_Average": None,
+            "Outbound_Maximum": None,
+            "image": None,
+            "error": "portal_down_500",
+        }
+

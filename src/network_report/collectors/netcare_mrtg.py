@@ -1373,7 +1373,27 @@ class NetcareScraper:
                 "Shared login failed; fast-failing %d targets without worker threads",
                 len(targets),
             )
-            return [MrtgSample(target_id=t.target_id, error="portal_down_500") for t in targets]
+            # Record fast-fail errors on disk so downstream consumers like
+            # load_mrtg_ocr_data see the error (e.g. portal_down_500).
+            ordered_samples = [
+                MrtgSample(target_id=t.target_id, error="portal_down_500") for t in targets
+            ]
+            values_json = {
+                s.target_id: {
+                    "Inbound_Current": None,
+                    "Inbound_Average": None,
+                    "Inbound_Maximum": None,
+                    "Outbound_Current": None,
+                    "Outbound_Average": None,
+                    "Outbound_Maximum": None,
+                    "image": None,
+                    "error": s.error,
+                }
+                for s in ordered_samples
+            }
+            json_path = dest_dir / f"mrtg_values_{date_compact}.json"
+            json_path.write_text(json.dumps(values_json, indent=2), encoding="utf-8")
+            return ordered_samples
 
         def _worker_task(target_list: list[MrtgTarget], worker_idx: int) -> list[MrtgSample]:
             samples: list[MrtgSample] = []
