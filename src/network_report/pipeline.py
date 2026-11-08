@@ -644,20 +644,23 @@ def run_daily_pipeline(
                     )
 
         hardware_fault_text = "Tidak ada hardware fault."
-        if huawei_ap_data and huawei_ap_data.outdoor_fault > 0:
-            names = (
-                f" ({', '.join(huawei_ap_data.fault_ap_names)})"
-                if huawei_ap_data.fault_ap_names
-                else ""
-            )
-            hardware_fault_text = f"AP Outdoor Fault : {huawei_ap_data.outdoor_fault} ea.{names}"
-        elif huawei_ap_data and huawei_ap_data.fault_count > 0:
-            names = (
-                f" ({', '.join(huawei_ap_data.fault_ap_names)})"
-                if huawei_ap_data.fault_ap_names
-                else ""
-            )
-            hardware_fault_text = f"AP Fault : {huawei_ap_data.fault_count} ea.{names}"
+        if huawei_ap_data:
+            fault_count = huawei_ap_data.fault_count
+            indoor_fault = huawei_ap_data.indoor_fault
+            outdoor_fault = huawei_ap_data.outdoor_fault
+            indoor_names = huawei_ap_data.indoor_fault_names
+            outdoor_names = huawei_ap_data.outdoor_fault_names
+            if indoor_fault > 0 and outdoor_fault > 0:
+                hardware_fault_text = (
+                    f"AP Fault : {fault_count} ea. (Outdoor: {', '.join(outdoor_names)}; "
+                    f"Indoor: {', '.join(indoor_names)})"
+                )
+            elif outdoor_fault > 0:
+                names = f" ({', '.join(outdoor_names)})" if outdoor_names else ""
+                hardware_fault_text = f"AP Outdoor Fault : {outdoor_fault} ea.{names}"
+            elif indoor_fault > 0:
+                names = f" ({', '.join(indoor_names)})" if indoor_names else ""
+                hardware_fault_text = f"AP Indoor Fault : {indoor_fault} ea.{names}"
 
         highlights = {
             "high_traffic": high_traffic_links,
@@ -709,6 +712,9 @@ def run_daily_pipeline(
                 "indoor_ok": huawei_ap_data.indoor_ok if huawei_ap_data else 328,
                 "outdoor_ok": huawei_ap_data.outdoor_ok if huawei_ap_data else 115,
                 "outdoor_fault": huawei_ap_data.outdoor_fault if huawei_ap_data else 0,
+                "indoor_fault": huawei_ap_data.indoor_fault if huawei_ap_data else 0,
+                "indoor_fault_names": huawei_ap_data.indoor_fault_names if huawei_ap_data else [],
+                "outdoor_fault_names": huawei_ap_data.outdoor_fault_names if huawei_ap_data else [],
                 "fault_names": huawei_ap_data.fault_ap_names if huawei_ap_data else [],
                 "ssid_distribution": huawei_ap_data.ssid_distribution if huawei_ap_data else {},
             },

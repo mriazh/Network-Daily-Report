@@ -834,7 +834,10 @@ class NetcareScraper:
                                 driver.add_cookie(sanitize_cookie(c))
                     driver.get(f"{self.graph_root}/graph/monitoring")
                     time.sleep(2)
-                    if self._is_authenticated_url(driver.current_url):
+                    if (
+                        self._is_authenticated_url(driver.current_url)
+                        and self._is_page_authenticated(driver)
+                    ):
                         return True
             except Exception as exc:
                 logger.debug("Failed reusing Netcare cookies: %s", exc)
@@ -934,6 +937,30 @@ class NetcareScraper:
         return "/mrtgnetcare2" in clean
 
     @staticmethod
+    def _is_page_authenticated(driver: Any) -> bool:
+        from selenium.webdriver.common.by import By
+
+        selectors = [
+            (By.CSS_SELECTOR, "#uname"),
+            (By.CSS_SELECTOR, "#passw"),
+            (By.CSS_SELECTOR, "body.login"),
+            (By.CSS_SELECTOR, "form[action*='login']"),
+        ]
+        try:
+            find_elements = getattr(driver, "find_elements", None)
+            if find_elements is None:
+                return True
+            for by, selector in selectors:
+                try:
+                    if find_elements(by, selector):
+                        return False
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
     def _dismiss_alerts(driver: Any, max_attempts: int = 3) -> None:
         for _ in range(max_attempts):
             try:
@@ -946,6 +973,8 @@ class NetcareScraper:
     def _check_session(driver: Any) -> None:
         current_url = getattr(driver, "current_url", "") or ""
         if "/public/login" in current_url.lower():
+            raise RuntimeError("Netcare session expired")
+        if not NetcareScraper._is_page_authenticated(driver):
             raise RuntimeError("Netcare session expired")
 
     @staticmethod
@@ -1014,9 +1043,12 @@ class NetcareScraper:
                 driver.get(title_url)
                 time.sleep(2)
 
-            assert self._has_lookup_input(
-                driver, "graphtitle"
-            ), f"graphtitle input missing on {getattr(driver, 'current_url', '')}"
+            if not self._has_lookup_input(driver, "graphtitle"):
+                logger.warning(
+                    "graphtitle input missing on %s; treating as expired session",
+                    getattr(driver, "current_url", ""),
+                )
+                raise RuntimeError("Netcare session expired")
             page_url = getattr(driver, "current_url", "") or title_url
             logger.info("Opened MRTG graph page: %s (kind=%s)", page_url, kind)
             return page_url
@@ -1329,19 +1361,67 @@ class NetcareScraper:
                         else:
                             sample = self.capture(t, target_date, driver=driver, output_dir=dest_dir)
                     except Exception as exc:
-                        msg = str(exc)
-                        logger.warning(
-                            "Capture attempt %d/%d failed for %s (worker %d): %s",
-                            attempt,
-                            max_attempts,
-                            t.target_id,
-                            worker_idx,
-                            exc,
-                        )
-                        sample = MrtgSample(
-                            target_id=t.target_id,
-                            error=msg or type(exc).__name__,
-                        )
+                        if isinstance(exc, RuntimeError) and "session expired" in str(exc).lower():
+                            try:
+                                if (
+                                    self.cookie_cache_path
+                                    and self.cookie_cache_path.exists()
+                                ):
+                                    self.cookie_cache_path.unlink()
+                                    logger.warning(
+                                        "Netcare session expired for %s; deleted stale cookie cache",
+                                        t.target_id,
+                                    )
+                            except Exception as unlink_exc:
+                                logger.debug(
+                                    "Failed deleting stale Netcare cookie cache: %s", unlink_exc
+                                )
+                            try:
+                                logged_in = self.login(driver)
+                            except Exception as login_exc:
+                                logger.warning(
+                                    "Fresh Netcare login failed for %s: %s", t.target_id, login_exc
+                                )
+                                logged_in = False
+                            if logged_in:
+                                try:
+                                    sample = self.capture(
+                                        t, target_date, driver=driver, output_dir=dest_dir
+                                    )
+                                except RuntimeError as cap_exc:
+                                    sample = MrtgSample(
+                                        target_id=t.target_id,
+                                        error=str(cap_exc) or type(cap_exc).__name__,
+                                    )
+                                except Exception as cap_exc:
+                                    logger.warning(
+                                        "Capture after fresh login failed for %s: %s",
+                                        t.target_id,
+                                        cap_exc,
+                                    )
+                                    sample = MrtgSample(
+                                        target_id=t.target_id,
+                                        error=str(cap_exc) or type(cap_exc).__name__,
+                                    )
+                            else:
+                                sample = MrtgSample(target_id=t.target_id, error="login_failed")
+                        else:
+                            msg = str(exc)
+                            logger.warning(
+                                "Capture attempt %d/%d failed for %s (worker %d): %s",
+                                attempt,
+                                max_attempts,
+                                t.target_id,
+                                worker_idx,
+                                exc,
+                            )
+                            sample = MrtgSample(
+                                target_id=t.target_id,
+                                error=msg or type(exc).__name__,
+                            )
+                        if sample is not None and sample.error is None:
+                            break
+                        continue
                     finally:
                         with contextlib.suppress(Exception):
                             driver.quit()

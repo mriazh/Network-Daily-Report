@@ -225,6 +225,9 @@ def test_wag_formatter():
             "indoor_ok": 328,
             "outdoor_ok": 115,
             "outdoor_fault": 0,
+            "indoor_fault": 0,
+            "indoor_fault_names": [],
+            "outdoor_fault_names": [],
             "fault_names": [],
             "ssid_distribution": {"Staff": 1000},
             "is_snapshot_1400": True,
@@ -1508,7 +1511,7 @@ def test_iot_summary_mtd_accumulation_sums_daily_and_ignores_missing_day(
 def test_wag_formatter_live_header():
     payload = {
         "date_str": "12 Oktober 2026",
-        "ap": {"is_snapshot_1400": False, "normal": 1, "fault": 0, "users": 2, "indoor_ok": 1, "outdoor_ok": 0, "outdoor_fault": 0, "fault_names": [], "ssid_distribution": {}},
+        "ap": {"is_snapshot_1400": False, "normal": 1, "fault": 0, "users": 2, "indoor_ok": 1, "outdoor_ok": 0, "outdoor_fault": 0, "indoor_fault": 0, "indoor_fault_names": [], "outdoor_fault_names": [], "fault_names": [], "ssid_distribution": {}},
     }
     from network_report.writers.wag_formatter import format_whatsapp_report
     msg = format_whatsapp_report(payload)

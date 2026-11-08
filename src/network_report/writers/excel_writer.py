@@ -239,10 +239,13 @@ def write_daily_excel(
     put(127, 5, ap.get("fault"))
     put(128, 5, ap.get("users"))
     put(133, 4, ap.get("indoor_ok"))
+    put(133, 5, ap.get("indoor_fault"))
     put(134, 4, ap.get("outdoor_ok"))
     put(134, 5, ap.get("outdoor_fault"))
-    if ap.get("fault_names"):
-        put(134, 6, f"AP Fault: {', '.join(ap.get('fault_names'))}")
+    if ap.get("indoor_fault_names"):
+        put(133, 6, f"Indoor Fault: {', '.join(ap.get('indoor_fault_names'))}")
+    if ap.get("outdoor_fault_names"):
+        put(134, 6, f"Outdoor Fault: {', '.join(ap.get('outdoor_fault_names'))}")
 
     # SSID
     for idx, (ssid, count) in enumerate(ap.get("ssid_distribution", {}).items()):
@@ -288,17 +291,8 @@ def write_daily_excel(
         put(row, 8, "Open" if ht.get("status") == "High Traffic" else "Normal")
 
     # Hardware Fault: row 177
-    hardware_fault = ""
-    if ap.get("fault_count", 0) > 0:
-        hardware_fault = f"AP Fault : {ap.get('fault_count', 0)} ea."
-        if ap.get("fault_names"):
-            hardware_fault += f" ({', '.join(ap.get('fault_names'))})"
-    elif ap.get("outdoor_fault", 0) > 0:
-        hardware_fault = f"AP Outdoor Fault : {ap.get('outdoor_fault', 0)} ea."
-        if ap.get("fault_names"):
-            hardware_fault += f" ({', '.join(ap.get('fault_names'))})"
-
-    if hardware_fault:
+    hardware_fault = highlights.get("hardware_fault", "Tidak ada hardware fault.")
+    if hardware_fault and hardware_fault != "Tidak ada hardware fault.":
         put(177, 2, hardware_fault)
         put(177, 5, "Investigasi tim on-duty / vendor")
         put(177, 8, "Open")

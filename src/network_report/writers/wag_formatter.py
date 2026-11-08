@@ -245,10 +245,15 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
             f"  c. Connected Users → 👥 {ap.get('users', 0)}",
             "",
             "2. Status Fisik AP",
-            f"  a. Indoor → ✅ {ap.get('indoor_ok', 328)} OK",
+            f"  a. Indoor → ✅ {ap.get('indoor_ok', 328)} OK"
+            + (
+                f", ⚠️ {ap.get('indoor_fault', 0)} Fault ({', '.join(ap.get('indoor_fault_names', []))})"
+                if ap.get("indoor_fault", 0) > 0
+                else ""
+            ),
             f"  b. Outdoor → ✅ {ap.get('outdoor_ok', 115)} OK"
             + (
-                f", ⚠️ {ap.get('outdoor_fault', 0)} Fault ({', '.join(ap.get('fault_names', []))})"
+                f", ⚠️ {ap.get('outdoor_fault', 0)} Fault ({', '.join(ap.get('outdoor_fault_names', []))})"
                 if ap.get("outdoor_fault", 0) > 0
                 else ""
             ),

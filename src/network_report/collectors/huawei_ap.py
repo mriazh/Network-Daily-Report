@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -18,8 +18,11 @@ class HuaweiApData:
     indoor_ok: int
     outdoor_ok: int
     outdoor_fault: int
-    total_users: int
-    ssid_distribution: dict[str, int]
+    indoor_fault: int = 0
+    indoor_fault_names: list[str] = field(default_factory=list)
+    outdoor_fault_names: list[str] = field(default_factory=list)
+    total_users: int = 0
+    ssid_distribution: dict[str, int] = field(default_factory=dict)
     sta_quantity: int = 0
 
 
@@ -30,6 +33,9 @@ class ApInfoResult(tuple):
     indoor_ok: int
     outdoor_ok: int
     outdoor_fault: int
+    indoor_fault: int
+    indoor_fault_names: list[str]
+    outdoor_fault_names: list[str]
     total_sta: int
     ap_sta_counts: dict[str, int]
 
@@ -41,11 +47,24 @@ class ApInfoResult(tuple):
         indoor_ok: int,
         outdoor_ok: int,
         outdoor_fault: int,
+        indoor_fault: int = 0,
+        indoor_fault_names: list[str] | None = None,
+        outdoor_fault_names: list[str] | None = None,
         total_sta: int = 0,
         ap_sta_counts: dict[str, int] | None = None,
     ):
         instance = super().__new__(
-            cls, (normal, fault, fault_names, indoor_ok, outdoor_ok, outdoor_fault)
+            cls,
+            (
+                normal,
+                fault,
+                fault_names,
+                indoor_ok,
+                outdoor_ok,
+                outdoor_fault,
+                indoor_fault,
+                outdoor_fault,
+            ),
         )
         instance.normal = normal
         instance.fault = fault
@@ -53,25 +72,30 @@ class ApInfoResult(tuple):
         instance.indoor_ok = indoor_ok
         instance.outdoor_ok = outdoor_ok
         instance.outdoor_fault = outdoor_fault
+        instance.indoor_fault = indoor_fault
+        instance.indoor_fault_names = indoor_fault_names or []
+        instance.outdoor_fault_names = outdoor_fault_names or []
         instance.total_sta = total_sta
         instance.ap_sta_counts = ap_sta_counts or {}
         return instance
 
 
 def parse_ap_info_csv(csv_path: Path) -> ApInfoResult:
-    normal = fault = indoor_ok = outdoor_ok = outdoor_fault = total_sta = 0
+    normal = fault = indoor_ok = outdoor_ok = outdoor_fault = indoor_fault = total_sta = 0
     fault_names: list[str] = []
+    indoor_fault_names: list[str] = []
+    outdoor_fault_names: list[str] = []
     ap_sta_counts: dict[str, int] = {}
 
     if not csv_path.exists():
-        return ApInfoResult(454, 0, [], 328, 115, 0, 0, {})
+        return ApInfoResult(454, 0, [], 328, 115, 0, 0, total_sta=0, ap_sta_counts={})
 
     with open(csv_path, mode="r", encoding="utf-8-sig", errors="ignore") as f:
         reader = csv.reader(f)
         try:
             raw_headers = next(reader)
         except StopIteration:
-            return ApInfoResult(454, 0, [], 328, 115, 0, 0, {})
+            return ApInfoResult(454, 0, [], 328, 115, 0, 0, total_sta=0, ap_sta_counts={})
 
         headers = [h.strip().strip('"').strip("'").strip("\t") for h in raw_headers]
         for raw_row in reader:
@@ -106,6 +130,10 @@ def parse_ap_info_csv(csv_path: Path) -> ApInfoResult:
                     fault_names.append(name)
                 if is_outdoor:
                     outdoor_fault += 1
+                    outdoor_fault_names.append(name)
+                else:
+                    indoor_fault += 1
+                    indoor_fault_names.append(name)
             else:
                 normal += 1
                 if is_outdoor:
@@ -120,8 +148,11 @@ def parse_ap_info_csv(csv_path: Path) -> ApInfoResult:
         indoor_ok,
         outdoor_ok,
         outdoor_fault,
-        total_sta,
-        ap_sta_counts,
+        indoor_fault=indoor_fault,
+        indoor_fault_names=indoor_fault_names,
+        outdoor_fault_names=outdoor_fault_names,
+        total_sta=total_sta,
+        ap_sta_counts=ap_sta_counts,
     )
 
 
@@ -208,6 +239,9 @@ def collect_huawei_ap_data(
     in_ok = ap_res.indoor_ok
     out_ok = ap_res.outdoor_ok
     out_fault = ap_res.outdoor_fault
+    in_fault = ap_res.indoor_fault
+    in_fault_names = ap_res.indoor_fault_names
+    out_fault_names = ap_res.outdoor_fault_names
     total_sta = ap_res.total_sta
 
     ssids = parse_ssid_info_csv(ssid_file)
@@ -220,6 +254,9 @@ def collect_huawei_ap_data(
         indoor_ok=in_ok,
         outdoor_ok=out_ok,
         outdoor_fault=out_fault,
+        indoor_fault=in_fault,
+        indoor_fault_names=in_fault_names,
+        outdoor_fault_names=out_fault_names,
         total_users=total_users,
         ssid_distribution=ssids,
         sta_quantity=total_sta,

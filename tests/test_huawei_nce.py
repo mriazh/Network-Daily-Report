@@ -46,13 +46,17 @@ def test_parse_ap_info_real_format(tmp_path: Path):
     ap_csv.write_text(content, encoding="utf-8-sig")
 
     res = parse_ap_info_csv(ap_csv)
-    normal, fault, fault_names, in_ok, out_ok, out_fault = res
+    normal, fault, fault_names, in_ok, out_ok, out_fault, in_fault, _ = res
     assert normal == 2
     assert fault == 3
     assert in_ok == 1
     assert out_ok == 1
     assert out_fault == 2  # AP-H2-L1-OUT02 (-out) and AP-H3-L1-OUT03 (-out + outdoor)
+    assert in_fault == 1  # AP-H2-L2-IN02 (indoor, offline)
     assert fault_names == ["AP-H2-L1-OUT02", "AP-H2-L2-IN02", "AP-H3-L1-OUT03"]
+    assert res.indoor_fault == 1
+    assert res.indoor_fault_names == ["AP-H2-L2-IN02"]
+    assert res.outdoor_fault_names == ["AP-H2-L1-OUT02", "AP-H3-L1-OUT03"]
     assert res.total_sta == 17
     assert res.ap_sta_counts["AP-H1-L1-IN01"] == 12
 
@@ -103,6 +107,9 @@ def test_collect_huawei_ap_data_no_sibling_and_real_fixture(tmp_path: Path):
     assert data.indoor_ok == 1
     assert data.outdoor_ok == 1
     assert data.outdoor_fault == 1
+    assert data.indoor_fault == 0
+    assert data.indoor_fault_names == []
+    assert data.outdoor_fault_names == ["AP-H1-OUT02"]
     assert data.fault_ap_names == ["AP-H1-OUT02"]
     assert data.total_users == 65
     assert data.sta_quantity == 15

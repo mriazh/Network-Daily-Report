@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1594,7 +1595,7 @@ def test_capture_restore_script_runs_when_screenshot_raises(tmp_path: Path):
 
     mock_driver.find_element.side_effect = lambda by, value=None: mock_sid_input
     mock_driver.find_elements.side_effect = lambda by, value=None: (
-        [mock_graph_img] if "graph.php" in str(value) else [MagicMock(), MagicMock()]
+        [mock_graph_img] if "graph.php" in str(value) else []
     )
     mock_driver.execute_script.side_effect = mock_execute_script
 
@@ -1634,7 +1635,7 @@ def test_capture_blank_or_small_png_reported_as_failure_and_triggers_retry(tmp_p
 
     mock_driver.find_element.side_effect = lambda by, value=None: mock_sid_input
     mock_driver.find_elements.side_effect = lambda by, value=None: (
-        [mock_graph_img] if "graph.php" in str(value) else [MagicMock(), MagicMock()]
+        [mock_graph_img] if "graph.php" in str(value) else []
     )
     mock_driver.execute_script.side_effect = mock_execute_script
 
@@ -1814,6 +1815,123 @@ def test_capture_session_expired_raises_runtime_error(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="Netcare session expired"):
         scraper.capture(target, target_date, driver=mock_driver, output_dir=tmp_path)
+
+
+def test_is_page_authenticated_detects_login_form():
+    driver = MagicMock()
+    driver.find_elements.return_value = []
+    assert NetcareScraper._is_page_authenticated(driver) is True
+
+    driver.find_elements.return_value = [MagicMock()]
+    assert NetcareScraper._is_page_authenticated(driver) is False
+
+
+def test_check_session_raises_on_rendered_login_form():
+    driver = MagicMock()
+    driver.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+    driver.find_elements.return_value = [MagicMock()]
+    with pytest.raises(RuntimeError, match="Netcare session expired"):
+        NetcareScraper._check_session(driver)
+
+
+def test_apply_cached_session_returns_false_when_inpage_login(tmp_path: Path):
+    cookie_file = tmp_path / "cookies.json"
+    cookie_file.write_text(
+        json.dumps([{"name": "session_id", "value": "pre_cached"}]), encoding="utf-8"
+    )
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        cookie_cache_path=cookie_file,
+    )
+
+    class LoginPageStubDriver:
+        def __init__(self):
+            self.current_url = "https://telkomcare.example.internal/public/login"
+            self.get_calls: list[str] = []
+
+        def get(self, url: str):
+            self.get_calls.append(url)
+            if "/mrtgnetcare2" in url:
+                self.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+        def delete_all_cookies(self):
+            pass
+
+        def add_cookie(self, cookie: dict):
+            pass
+
+        def find_elements(self, by, selector):
+            # Login form rendered in-page although URL is the monitoring page
+            return [MagicMock()]
+
+        def quit(self):
+            pass
+
+    driver = LoginPageStubDriver()
+    assert scraper._apply_cached_session(driver) is False
+
+
+def test_capture_all_session_expired_purges_cookie_cache_and_fresh_logins(tmp_path: Path):
+    cookie_file = tmp_path / "cookies.json"
+    cookie_file.write_text(
+        json.dumps([{"name": "session_id", "value": "stale"}]), encoding="utf-8"
+    )
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        cookie_cache_path=cookie_file,
+        workers=1,
+    )
+
+    class StubDriver:
+        def __init__(self):
+            self.current_url = "https://telkomcare.example.internal/public/login"
+            self.get_calls: list[str] = []
+
+        def get(self, url: str):
+            self.get_calls.append(url)
+            if "/mrtgnetcare2" in url:
+                self.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+        def delete_all_cookies(self):
+            pass
+
+        def add_cookie(self, cookie: dict):
+            pass
+
+        def get_cookies(self):
+            return []
+
+        def quit(self):
+            pass
+
+    capture_calls = 0
+
+    def flaky_capture(t, d, driver=None, output_dir=None):
+        nonlocal capture_calls
+        capture_calls += 1
+        if capture_calls == 1:
+            raise RuntimeError("Netcare session expired")
+        return MrtgSample(target_id=t.target_id, inbound_maximum="10 M")
+
+    targets = [MrtgTarget(target_id="SID-1", kind="sid")]
+    target_date = date(2026, 10, 22)
+
+    with (
+        patch.object(scraper, "_create_driver", side_effect=lambda **kw: StubDriver()),
+        patch.object(scraper, "_apply_cached_session", return_value=True),
+        patch.object(scraper, "capture", side_effect=flaky_capture),
+        patch.object(scraper, "login", return_value=True) as mock_login,
+        patch("network_report.collectors.netcare_mrtg.time.sleep"),
+    ):
+        samples = scraper.capture_all(targets, target_date, output_dir=tmp_path / "out")
+
+    assert len(samples) == 1
+    assert samples[0].error is None
+    assert capture_calls == 2
+    assert mock_login.call_count == 2  # shared login + fresh login after expiry
+    assert not cookie_file.exists()
 
 
 def test_shared_login_happens_once_for_round(tmp_path: Path):
