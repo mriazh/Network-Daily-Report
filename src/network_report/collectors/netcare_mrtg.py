@@ -937,7 +937,30 @@ class NetcareScraper:
         return "/mrtgnetcare2" in clean
 
     @staticmethod
+    def _is_portal_error_rendered(driver: Any) -> bool:
+        """Return True if the TelkomCare portal is rendering a 500/403/502/504 error page."""
+        from selenium.webdriver.common.by import By
+
+        try:
+            body = driver.find_element(By.TAG_NAME, "body")
+            text = (body.text or "").lower()
+        except Exception:
+            return False
+        tokens = (
+            "sorry, we have a problem",
+            "does not exist",
+            "500\n",
+            "you dont have authorize",
+            "403\n",
+            "502 bad gateway",
+            "504 gateway time-out",
+        )
+        return any(token in text for token in tokens)
+
+    @staticmethod
     def _is_page_authenticated(driver: Any) -> bool:
+        if NetcareScraper._is_portal_error_rendered(driver):
+            return False
         from selenium.webdriver.common.by import By
 
         selectors = [
@@ -971,6 +994,8 @@ class NetcareScraper:
 
     @staticmethod
     def _check_session(driver: Any) -> None:
+        if NetcareScraper._is_portal_error_rendered(driver):
+            raise RuntimeError("Netcare portal error 500: Sorry, we have a problem")
         current_url = getattr(driver, "current_url", "") or ""
         if "/public/login" in current_url.lower():
             raise RuntimeError("Netcare session expired")
@@ -1323,8 +1348,17 @@ class NetcareScraper:
         try:
             shared_login_ok = self.login(shared_driver)
             if shared_login_ok:
-                self._save_cookies(shared_driver)
-                logger.info("Shared login: ok")
+                # If the portal is rendering a 500/403/502/504 error page on the
+                # graph/monitoring page, treat the shared login as unusable and
+                # fast-fail the whole round without starting worker threads.
+                if NetcareScraper._is_portal_error_rendered(shared_driver):
+                    shared_login_ok = False
+                    logger.warning(
+                        "Shared login: portal error 500 detected on graph/monitoring"
+                    )
+                else:
+                    self._save_cookies(shared_driver)
+                    logger.info("Shared login: ok")
             else:
                 logger.info("Shared login: error (login_failed)")
         except Exception as exc:
@@ -1333,6 +1367,13 @@ class NetcareScraper:
         finally:
             with contextlib.suppress(Exception):
                 shared_driver.quit()
+
+        if not shared_login_ok:
+            logger.warning(
+                "Shared login failed; fast-failing %d targets without worker threads",
+                len(targets),
+            )
+            return [MrtgSample(target_id=t.target_id, error="portal_down_500") for t in targets]
 
         def _worker_task(target_list: list[MrtgTarget], worker_idx: int) -> list[MrtgSample]:
             samples: list[MrtgSample] = []

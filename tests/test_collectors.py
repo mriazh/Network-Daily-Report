@@ -165,6 +165,31 @@ def test_mrtg_evaluation():
     assert c2.utilization_pct == 15.0
 
 
+def test_evaluate_circuit_portal_down_500():
+    c = evaluate_circuit("Link A", "SID-1", "10 MB", None, None, error="portal_down_500")
+    assert c.status == "⚠️ Portal Down (Error 500)"
+    assert c.max_mbps is None
+    assert c.utilization_pct is None
+
+    c2 = evaluate_circuit(
+        "Link B",
+        "SID-2",
+        "10 MB",
+        None,
+        None,
+        error="Netcare portal error 500: Sorry, we have a problem",
+    )
+    assert c2.status == "⚠️ Portal Down (Error 500)"
+
+    # Non-portal errors still yield No Data.
+    c3 = evaluate_circuit("Link C", "SID-3", "10 MB", None, None, error="capture failure")
+    assert c3.status == "No Data"
+
+    # No error at all yields No Data.
+    c4 = evaluate_circuit("Link D", "SID-4", "10 MB", None, None)
+    assert c4.status == "No Data"
+
+
 def test_indibiz_query_nonexistent(tmp_path: Path):
     non_existent = tmp_path / "traffic.db"
     rx, tx = load_indibiz_daily_max(non_existent, "2026-10-12")
@@ -241,6 +266,29 @@ def test_wag_formatter():
     assert "SITE.1 → 2.50 GB" in msg
     # Section D header must reflect 14:00 WIB peak hour data source
     assert "*D. 📶 AP Huawei (Data: 14.00 WIB)*" in msg
+
+
+def test_wag_formatter_portal_down_no_double_emoji():
+    payload = {
+        "date_str": "22 Oktober 2026",
+        "mrtg": {
+            "ASTINET": [
+                {
+                    "name": "CGK Primary",
+                    "sid": "1000001-0000000002",
+                    "capacity_str": "1 GB",
+                    "status": "⚠️ Portal Down (Error 500)",
+                }
+            ]
+        },
+    }
+    wag = format_whatsapp_report(payload)
+    assert (
+        "CGK Primary (SID: 1000001-0000000002) (1 GB) → ⚠️ Portal Down (Error 500)"
+        in wag
+    )
+    # No doubled warning emoji.
+    assert "→ ⚠️ ⚠️ Portal Down" not in wag
 
 
 def test_wag_top_usage_headers_are_distinct():

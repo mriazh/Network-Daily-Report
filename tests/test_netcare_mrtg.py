@@ -2857,3 +2857,89 @@ def test_capture_all_skips_post_capture_when_speeds_present(tmp_path: Path):
     assert samples[0].inbound_maximum == "10 M"
     assert not scraper.legend_extractor.extract.called
 
+
+def test_is_portal_error_rendered_detects_error_pages():
+    for error_text in [
+        "Sorry, we have a problem",
+        "does not exist",
+        "500\n",
+        "You Dont Have Authorize",
+        "403\n",
+        "502 Bad Gateway",
+        "504 Gateway Time-out",
+    ]:
+        driver = MagicMock()
+        driver.find_element.return_value = MagicMock(text=error_text)
+        assert NetcareScraper._is_portal_error_rendered(driver) is True, error_text
+
+    driver = MagicMock()
+    driver.find_element.return_value = MagicMock(
+        text="Welcome to TelkomCare MRTG Monitoring"
+    )
+    assert NetcareScraper._is_portal_error_rendered(driver) is False
+
+
+def test_is_portal_error_rendered_missing_body_returns_false():
+    driver = MagicMock()
+    driver.find_element.side_effect = Exception("no body")
+    assert NetcareScraper._is_portal_error_rendered(driver) is False
+
+
+def test_is_page_authenticated_returns_false_on_portal_error():
+    driver = MagicMock()
+    driver.find_element.return_value = MagicMock(text="Sorry, we have a problem")
+    # Portal error short-circuits authentication to False even without a login form.
+    assert NetcareScraper._is_page_authenticated(driver) is False
+
+
+def test_check_session_raises_on_portal_error():
+    driver = MagicMock()
+    driver.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+    driver.find_element.return_value = MagicMock(text="Sorry, we have a problem")
+    with pytest.raises(
+        RuntimeError, match="Netcare portal error 500: Sorry, we have a problem"
+    ):
+        NetcareScraper._check_session(driver)
+
+
+def test_capture_all_fast_fails_on_portal_error_500(tmp_path: Path):
+    scraper = NetcareScraper(
+        base_url="https://telkomcare.example.internal",
+        username="user",
+        password="pwd",
+        workers=2,
+    )
+
+    shared_driver = MagicMock()
+    shared_driver.current_url = "https://telkomcare.example.internal/mrtgnetcare2/graph/monitoring"
+
+    driver_creations = {"n": 0}
+
+    def mock_create_driver(profile_subpath=None):
+        driver_creations["n"] += 1
+        return shared_driver
+
+    targets = [
+        MrtgTarget(target_id="SID-1", kind="sid", name="Link 1"),
+        MrtgTarget(target_id="SID-2", kind="sid", name="Link 2"),
+    ]
+    target_date = date(2026, 10, 22)
+
+    with (
+        patch.object(scraper, "_create_driver", side_effect=mock_create_driver),
+        patch.object(scraper, "login", return_value=True),
+        patch.object(
+            NetcareScraper, "_is_portal_error_rendered", return_value=True
+        ),
+        patch.object(scraper, "capture") as mock_cap,
+    ):
+        samples = scraper.capture_all(targets, target_date, output_dir=tmp_path / "out")
+
+    assert len(samples) == 2
+    assert all(s.error == "portal_down_500" for s in samples)
+    assert all(s.target_id in ("SID-1", "SID-2") for s in samples)
+    # Fast-fail: no worker threads, no captures started.
+    assert mock_cap.call_count == 0
+    # Only the shared driver was created.
+    assert driver_creations["n"] == 1
+

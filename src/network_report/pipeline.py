@@ -61,7 +61,8 @@ def _build_mrtg_payload(
         d = _find_ocr(sid)
         max_in = d.get("in_mbps") if d else None
         max_out = d.get("out_mbps") if d else None
-        status = evaluate_circuit(name, sid, cap, max_in, max_out)
+        err = d.get("error") if d else None
+        status = evaluate_circuit(name, sid, cap, max_in, max_out, error=err)
         astinet_list.append(
             {
                 "name": name,
@@ -83,7 +84,8 @@ def _build_mrtg_payload(
         d = _find_ocr(sid)
         max_in = d.get("in_mbps") if d else None
         max_out = d.get("out_mbps") if d else None
-        status = evaluate_circuit(name, sid, cap, max_in, max_out)
+        err = d.get("error") if d else None
+        status = evaluate_circuit(name, sid, cap, max_in, max_out, error=err)
         metro_list.append(
             {
                 "name": name,
@@ -106,7 +108,8 @@ def _build_mrtg_payload(
         d = _find_ocr(sid)
         max_in = d.get("in_mbps") if d else None
         max_out = d.get("out_mbps") if d else None
-        status = evaluate_circuit(name, sid, cap, max_in, max_out)
+        err = d.get("error") if d else None
+        status = evaluate_circuit(name, sid, cap, max_in, max_out, error=err)
         link_item = {
             "name": name,
             "sid": sid,

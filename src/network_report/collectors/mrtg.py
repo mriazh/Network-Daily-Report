@@ -63,6 +63,7 @@ def evaluate_circuit(
     max_in_mbps: float | None = None,
     max_out_mbps: float | None = None,
     threshold_pct: float = 100.0,
+    error: str | None = None,
 ) -> CircuitStatus:
     cap_mbps = parse_capacity_to_mbps(capacity_str)
     in_val = max_in_mbps or 0.0
@@ -70,6 +71,12 @@ def evaluate_circuit(
     highest = max(in_val, out_val)
 
     if highest <= 0.0:
+        if error and ("500" in error or "portal_down" in error):
+            status = "⚠️ Portal Down (Error 500)"
+            remarks = "Portal Down (Error 500)"
+        else:
+            status = "No Data"
+            remarks = ""
         return CircuitStatus(
             name=name,
             sid=sid,
@@ -80,8 +87,8 @@ def evaluate_circuit(
             over_pct=None,
             over_mbps=None,
             direction=None,
-            status="No Data",
-            remarks="",
+            status=status,
+            remarks=remarks,
         )
 
     util_pct = (highest / cap_mbps) * 100.0
@@ -149,6 +156,7 @@ def load_mrtg_ocr_data(
                     results[str(sid).strip()] = {
                         "in_mbps": parse_mrtg_speed_mbps(vals.get("Inbound_Maximum")),
                         "out_mbps": parse_mrtg_speed_mbps(vals.get("Outbound_Maximum")),
+                        "error": vals.get("error"),
                     }
     except Exception as exc:
         logger.warning("Failed reading MRTG values from %s: %s", target_file, exc)

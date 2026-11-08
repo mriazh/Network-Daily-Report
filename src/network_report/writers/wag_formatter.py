@@ -111,6 +111,13 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
             continue
         for idx, link_item in enumerate(links, ord("a")):
             st = link_item.get("status")
+            # A Portal Down status already carries the ⚠️ prefix; render it once
+            # to avoid a doubled warning emoji.
+            if st and "Portal Down" in st:
+                lines.append(
+                    f"  {chr(idx)}. {link_item.get('name')} (SID: {link_item.get('sid')}) ({link_item.get('capacity_str')}) → {st}"
+                )
+                continue
             if st == "High Traffic":
                 status_icon = "⚠️"
                 extra = f" ({link_item.get('remarks', '')})"
