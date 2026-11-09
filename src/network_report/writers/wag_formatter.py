@@ -310,6 +310,16 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
     else:
         lines.append("  a. Seluruh sirkuit terpantau Normal.")
 
+    if highlights.get("mrtg_downtime"):
+        lines.extend(
+            [
+                "",
+                "Portal Downtime Notation: TelkomCare MRTG portal remained unreachable "
+                "(HTTP 500) through the final retry deadline (00:00 WIB). MRTG circuits "
+                "are reported as Portal Down (Error 500) with no utilization data.",
+            ]
+        )
+
     lines.extend(
         [
             "2. Hardware Fault:",

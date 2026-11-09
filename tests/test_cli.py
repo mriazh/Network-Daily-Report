@@ -244,6 +244,39 @@ def test_sample_ap_with_collector_error(monkeypatch, tmp_path, capsys):
     assert "AP Sampler failed: login failed" in captured.out
 
 
+def test_run_passed_no_deferred_retry_flag(monkeypatch, tmp_path, capsys):
+    """Verify --no-deferred-retry passes o_deferred_retry=False to run_daily_pipeline."""
+    captured = {}
+
+    def fake_run_daily_pipeline(date_input, send_wa, test_mode=False, o_deferred_retry=True):
+        captured["o_deferred_retry"] = o_deferred_retry
+        captured["test_mode"] = test_mode
+        return {
+            "excel_path": str(tmp_path / "x.xlsx"),
+            "wag_path": str(tmp_path / "wag.txt"),
+            "payload": {},
+            "wa_sent": False,
+        }
+
+    monkeypatch.setattr("network_report.cli.run_daily_pipeline", fake_run_daily_pipeline)
+    monkeypatch.setattr("network_report.cli.load_config", lambda: _cfg(tmp_path))
+
+    code = main(["run", "--date", "2026-10-12", "--no-deferred-retry"])
+    assert code == 0
+    assert captured["o_deferred_retry"] is False
+
+    captured.clear()
+    code = main(["run", "--date", "2026-10-12"])
+    assert code == 0
+    assert captured["o_deferred_retry"] is True
+
+    captured.clear()
+    code = main(["run", "--date", "2026-10-12", "--test"])
+    assert code == 0
+    assert captured["o_deferred_retry"] is True
+    assert captured["test_mode"] is True
+
+
 def _cfg(tmp_path):
     from network_report.config import AppConfig
     from network_report.config import GowaSettings

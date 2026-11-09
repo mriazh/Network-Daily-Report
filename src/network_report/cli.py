@@ -125,6 +125,12 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument(
         "--test", action="store_true", help="Include test banner in WhatsApp notification"
     )
+    run_parser.add_argument(
+        "--no-deferred-retry",
+        action="store_true",
+        default=False,
+        help="Bypass deferred retry waiting on portal downtime (manual backfills/tests)",
+    )
 
     # Command: test-ping
     subparsers.add_parser("test-ping", help="Test ICMP ping to all 7 nexthop targets")
@@ -437,7 +443,12 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "run":
         print(f"Executing daily report pipeline for: {args.date}...")
-        result = run_daily_pipeline(args.date, args.send_wa, test_mode=args.test)
+        result = run_daily_pipeline(
+            args.date,
+            args.send_wa,
+            test_mode=args.test,
+            o_deferred_retry=not args.no_deferred_retry,
+        )
         print(f"Excel: {result['excel_path']}")
         print(f"WhatsApp report: {result['wag_path']}")
         print(f"WhatsApp sent: {result['wa_sent']}")

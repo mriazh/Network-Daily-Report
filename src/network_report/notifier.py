@@ -140,3 +140,35 @@ class GowaNotifier:
         prefix = "[TEST] " if test_mode else ""
         message = f"{prefix}[HUAWEI AP SAMPLER] [FAILED] ❌ Gagal sampling data AP: {error}"
         return self.send_message(message)
+
+    def send_pipeline_delayed(
+        self,
+        target_date_str: str,
+        issue_title: str,
+        issue_details: str,
+        current_time_str: str,
+        retry_slots: list[str],
+        next_retry_str: str,
+        test_mode: bool = False,
+    ) -> bool:
+        """Send delayed retry-schedule notification when the portal is down.
+
+        All alert text is in English per Phase 25 requirements. The WhatsApp
+        Daily Report template (Template-Daily-WAG.md) remains in Indonesian.
+        """
+        prefix = "[TEST] " if test_mode else ""
+        slots_text = "\n".join(f"• {slot} WIB" for slot in retry_slots)
+        message = (
+            f"{prefix}⚠️ *DAILY REPORT DELAYED - RETRY SCHEDULED*\n"
+            f"📅 {target_date_str} | {current_time_str}\n"
+            f"\n"
+            f"*Status:* ⏸️ Daily Report Delivery Deferred\n"
+            f"*Issue:* {issue_title}\n"
+            f"*Details:* {issue_details}\n"
+            f"\n"
+            f"*Retry Schedule:*\n"
+            f"{slots_text}\n"
+            f"\n"
+            f"_The system will automatically re-attempt crawling and deliver the full report once the portal recovers._"
+        )
+        return self.send_message(message)

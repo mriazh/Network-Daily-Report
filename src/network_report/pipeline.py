@@ -323,8 +323,68 @@ def is_1400_snapshot(ap_file: "Path") -> bool:
     return 13 <= mtime.hour <= 16
 
 
+# Default deferred retry slots (WIB) used when the TelkomCare MRTG portal is down
+# during a live 22:00 WIB run. The final slot (00:00) is the hard deadline.
+RETRY_SLOTS_WIB = ["22:30", "23:00", "23:30", "00:00"]
+
+
+def _wait_until_slot(slot_str: str) -> None:
+    """Sleep until the next local occurrence of an HH:MM retry slot."""
+    now = datetime.now()
+    hour, minute = (int(part) for part in slot_str.split(":"))
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    wait_seconds = max(0.0, (target - now).total_seconds())
+    if wait_seconds > 0:
+        logger.info(
+            "Deferred retry: waiting until %s local time (%.0f seconds)", slot_str, wait_seconds
+        )
+        time.sleep(wait_seconds)
+
+
+def _run_netcare_capture(
+    cfg: AppConfig,
+    circuits: dict,
+    target_date,
+    output_dir: Path,
+) -> list:
+    """Build a NetcareScraper and run capture_all, returning MrtgSample list.
+
+    This is factored out so the deferred-retry loop can re-attempt ONLY the
+    MRTG/Netcare collector while reusing every other collector's cached result.
+    """
+    targets = build_targets_from_circuits(circuits)
+    if not targets:
+        return []
+    api_keys = [k.strip() for k in cfg.netcare.captcha_api_keys.split(",") if k.strip()]
+    models = [m.strip() for m in cfg.netcare.captcha_models.split(",") if m.strip()]
+    scraper = NetcareScraper(
+        base_url=cfg.netcare.base_url,
+        username=cfg.netcare.username,
+        password=cfg.netcare.password,
+        totp_secret=cfg.netcare.totp_secret,
+        captcha_enabled=cfg.netcare.captcha_enabled,
+        captcha_api_keys=api_keys,
+        captcha_models=models,
+        captcha_proxy=cfg.netcare.captcha_proxy,
+        profile_dir=cfg.netcare.profile_dir,
+        cookie_cache_path=cfg.netcare.cookie_cache_path,
+        headless=cfg.netcare.headless,
+        page_timeout_seconds=cfg.netcare.page_timeout_seconds,
+        graph_timeout_seconds=cfg.netcare.graph_timeout_seconds,
+        workers=cfg.netcare.workers,
+        binary_path=cfg.netcare.binary_path,
+        driver_path=cfg.netcare.driver_path,
+    )
+    return scraper.capture_all(targets, target_date, output_dir=output_dir)
+
+
 def run_daily_pipeline(
-    date_input: str = "today", send_wa: bool = False, test_mode: bool = False
+    date_input: str = "today",
+    send_wa: bool = False,
+    test_mode: bool = False,
+    o_deferred_retry: bool = False,
 ) -> dict:
     """Execute full daily report pipeline.
 
@@ -580,47 +640,107 @@ def run_daily_pipeline(
         # MRTG circuits
         circuits = _load_circuits(cfg)
         mrtg_error: str | None = None
+        mrtg_portal_down: bool = False
+        mrtg_samples = None
         if cfg.netcare.enabled:
-            try:
-                targets = build_targets_from_circuits(circuits)
-                if targets:
-                    api_keys = [
-                        k.strip() for k in cfg.netcare.captcha_api_keys.split(",") if k.strip()
-                    ]
-                    models = [m.strip() for m in cfg.netcare.captcha_models.split(",") if m.strip()]
-                    scraper = NetcareScraper(
-                        base_url=cfg.netcare.base_url,
-                        username=cfg.netcare.username,
-                        password=cfg.netcare.password,
-                        totp_secret=cfg.netcare.totp_secret,
-                        captcha_enabled=cfg.netcare.captcha_enabled,
-                        captcha_api_keys=api_keys,
-                        captcha_models=models,
-                        captcha_proxy=cfg.netcare.captcha_proxy,
-                        profile_dir=cfg.netcare.profile_dir,
-                        cookie_cache_path=cfg.netcare.cookie_cache_path,
-                        headless=cfg.netcare.headless,
-                        page_timeout_seconds=cfg.netcare.page_timeout_seconds,
-                        graph_timeout_seconds=cfg.netcare.graph_timeout_seconds,
-                        workers=cfg.netcare.workers,
-                        binary_path=cfg.netcare.binary_path,
-                        driver_path=cfg.netcare.driver_path,
-                    )
-                    target_date = datetime.strptime(date_iso, "%Y-%m-%d").date()
-                    scraper.capture_all(
-                        targets,
+            targets = build_targets_from_circuits(circuits)
+            if targets:
+                target_date = datetime.strptime(date_iso, "%Y-%m-%d").date()
+                mrtg_output_dir = cfg.output_raw_root / "mrtg" / date_compact
+                try:
+                    mrtg_samples = _run_netcare_capture(
+                        cfg,
+                        circuits,
                         target_date,
-                        output_dir=cfg.output_raw_root / "mrtg" / date_compact,
+                        output_dir=mrtg_output_dir,
                     )
-            except Exception as exc:
-                logger.error("Netcare MRTG scrape failed: %s", exc)
-                mrtg_error = str(exc)
+                except Exception as exc:
+                    logger.error("Netcare MRTG scrape failed: %s", exc)
+                    mrtg_error = str(exc)
+
+                if mrtg_samples is not None:
+                    # Detect portal downtime from fast-fail portal_down_500 samples.
+                    portal_down = all(
+                        s.error and "portal_down_500" in s.error for s in mrtg_samples
+                    )
+                    if portal_down:
+                        mrtg_portal_down = True
+
+                    # Deferred retry schedule for live runs when portal is down.
+                    if mrtg_portal_down and date_input == "today" and not test_mode and o_deferred_retry:
+                        logger.warning(
+                            "Deferred retry: TelkomCare portal down (500) detected for %s. "
+                            "Report delivery deferred to retry slots: %s",
+                            date_iso,
+                            ", ".join(RETRY_SLOTS_WIB),
+                        )
+                        if notifier is not None:
+                            notifier.send_pipeline_delayed(
+                                target_date_str=date_str,
+                                issue_title="TelkomCare Portal Down (Error 500)",
+                                issue_details=(
+                                    "MRTG Netcare scraping failed during the 22:00 WIB run "
+                                    "because the portal returned HTTP 500 / internal server error."
+                                ),
+                                current_time_str=datetime.now().strftime("%d %B %Y %H:%M WIB"),
+                                retry_slots=RETRY_SLOTS_WIB,
+                                next_retry_str=RETRY_SLOTS_WIB[0],
+                                test_mode=test_mode,
+                            )
+                        # Re-attempt ONLY Netcare MRTG at each scheduled slot; other
+                        # collectors remain cached from the first pass.
+                        recovered = False
+                        for slot_idx, slot in enumerate(RETRY_SLOTS_WIB):
+                            _wait_until_slot(slot)
+                            logger.info(
+                                "Deferred retry: re-attempting Netcare MRTG at slot %s (%s)",
+                                slot,
+                                date_iso,
+                            )
+                            try:
+                                retry_samples = _run_netcare_capture(
+                                    cfg,
+                                    circuits,
+                                    target_date,
+                                    output_dir=mrtg_output_dir,
+                                )
+                                portal_down_now = all(
+                                    s.error and "portal_down_500" in s.error
+                                    for s in retry_samples
+                                )
+                                if not portal_down_now:
+                                    mrtg_samples = retry_samples
+                                    recovered = True
+                                    logger.info(
+                                        "Deferred retry: Netcare MRTG recovered at slot %s", slot
+                                    )
+                                    break
+                                else:
+                                    mrtg_samples = retry_samples
+                                    logger.warning(
+                                        "Deferred retry: portal still down at slot %s", slot
+                                    )
+                            except Exception as exc:
+                                logger.error(
+                                    "Deferred retry attempt at %s failed: %s", slot, exc
+                                )
+
+                        if recovered:
+                            mrtg_portal_down = False
+                        else:
+                            # Final deadline reached: finalize report with downtime notation.
+                            logger.warning(
+                                "Deferred retry: final deadline (00:00 WIB) reached; portal still down. "
+                                "Finalizing report with TelkomCare downtime notation."
+                            )
 
         mrtg_payload = _build_mrtg_payload(circuits, cfg, date_iso, date_compact)
         all_circuits = [c for grp in mrtg_payload.values() for c in grp]
         if all_circuits and all(c.get("status") == "No Data" for c in all_circuits):
             if not mrtg_error:
                 mrtg_error = "No MRTG data available"
+        if mrtg_portal_down and not mrtg_error:
+            mrtg_error = "TelkomCare portal down (Error 500) at final deadline (00:00 WIB)"
 
         # 2. Build highlights / technical analysis
         raw_cpu = airwave_data.top_cpu if airwave_data else []
@@ -669,6 +789,7 @@ def run_daily_pipeline(
             "high_traffic": high_traffic_links,
             "hardware_fault": hardware_fault_text,
             "problem_open": "-",
+            "mrtg_downtime": mrtg_portal_down,
         }
 
         wac_dict = None

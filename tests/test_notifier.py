@@ -78,6 +78,49 @@ def test_ap_sampler_test_mode_messages():
     ]
 
 
+def test_send_pipeline_delayed_message_format():
+    n = _Recorder()
+    n.send_pipeline_delayed(
+        target_date_str="9 November 2026",
+        issue_title="TelkomCare Portal Down (Error 500)",
+        issue_details="MRTG Netcare scraping failed during the 22:00 WIB run because the portal returned HTTP 500 / internal server error.",
+        current_time_str="22:00 WIB",
+        retry_slots=["22:30", "23:00", "23:30", "00:00"],
+        next_retry_str="22:30",
+    )
+    assert n.sent == [
+        "⚠️ *DAILY REPORT DELAYED - RETRY SCHEDULED*\n"
+        "📅 9 November 2026 | 22:00 WIB\n"
+        "\n"
+        "*Status:* ⏸️ Daily Report Delivery Deferred\n"
+        "*Issue:* TelkomCare Portal Down (Error 500)\n"
+        "*Details:* MRTG Netcare scraping failed during the 22:00 WIB run because the portal returned HTTP 500 / internal server error.\n"
+        "\n"
+        "*Retry Schedule:*\n"
+        "• 22:30 WIB\n"
+        "• 23:00 WIB\n"
+        "• 23:30 WIB\n"
+        "• 00:00 WIB\n"
+        "\n"
+        "_The system will automatically re-attempt crawling and deliver the full report once the portal recovers._"
+    ]
+
+
+def test_send_pipeline_delayed_test_mode_prefix():
+    n = _Recorder()
+    n.send_pipeline_delayed(
+        target_date_str="9 November 2026",
+        issue_title="TelkomCare Portal Down (Error 500)",
+        issue_details="Portal returned HTTP 500.",
+        current_time_str="22:00 WIB",
+        retry_slots=["22:30"],
+        next_retry_str="22:30",
+        test_mode=True,
+    )
+    assert n.sent[0].startswith("[TEST] ⚠️ *DAILY REPORT DELAYED - RETRY SCHEDULED*")
+    assert "[TEST]" in n.sent[0]
+
+
 def test_send_report_alias_delivers_message(monkeypatch):
     n = _Recorder()
     monkeypatch.setattr(n, "send_message", lambda m: True)
