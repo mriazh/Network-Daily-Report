@@ -482,6 +482,9 @@ def run_daily_pipeline(
             if cmp_crawler_result.error:
                 logger.warning("CMP crawler error: %s", cmp_crawler_result.error)
 
+        # Track CMP success for deferred retry (CMP not enabled => not a failure)
+        cmp_success = cmp_crawler_result is None or cmp_crawler_result.error is None
+
         iot_summary: IotDailySummary | None = None
         if cfg.cmp.enabled and cfg.cmp.raw_dir:
             iot_summary = collect_iot_summary(
@@ -642,6 +645,7 @@ def run_daily_pipeline(
         mrtg_error: str | None = None
         mrtg_portal_down: bool = False
         mrtg_samples = None
+        mrtg_success = True  # MRTG not enabled => not a failure
         if cfg.netcare.enabled:
             targets = build_targets_from_circuits(circuits)
             if targets:
@@ -666,73 +670,177 @@ def run_daily_pipeline(
                     if portal_down:
                         mrtg_portal_down = True
 
-                    # Deferred retry schedule for live runs when portal is down.
-                    if mrtg_portal_down and date_input == "today" and not test_mode and o_deferred_retry:
-                        logger.warning(
-                            "Deferred retry: TelkomCare portal down (500) detected for %s. "
-                            "Report delivery deferred to retry slots: %s",
-                            date_iso,
-                            ", ".join(RETRY_SLOTS_WIB),
+                # Track MRTG success for deferred retry (MRTG not enabled => not a failure).
+                # Portal-down samples count as failure even though samples exist.
+                mrtg_success = mrtg_samples is not None and not mrtg_portal_down
+
+        # ------------------------------------------------------------------
+        # Multi-collector deferred retry engine (Phase 26)
+        # ------------------------------------------------------------------
+        # Trigger when EITHER CMP or MRTG failed during a live 22:00 WIB run.
+        # Stable collectors (AirWave, Huawei AP, Ping, Orbit) remain cached and
+        # are NOT re-crawled.
+        deferred = (
+            date_input == "today"
+            and not test_mode
+            and o_deferred_retry
+            and (not cmp_success or not mrtg_success)
+        )
+
+        if deferred:
+            # Build English issue title and details
+            failed_parts: list[str] = []
+            if not cmp_success:
+                failed_parts.append("CMP M2M Crawler Failed")
+            if not mrtg_success:
+                failed_parts.append("MRTG Scrape Failed")
+            issue_title = " + ".join(failed_parts)
+
+            details_lines: list[str] = []
+            if not cmp_success:
+                cmp_err = (
+                    cmp_crawler_result.error
+                    if (cmp_crawler_result and cmp_crawler_result.error)
+                    else "CMP crawler did not produce a result"
+                )
+                details_lines.append(
+                    f"CMP M2M crawler failed during the 22:00 WIB run: {cmp_err}"
+                )
+            if not mrtg_success:
+                if mrtg_portal_down:
+                    details_lines.append(
+                        "MRTG Netcare scraping failed during the 22:00 WIB run because "
+                        "the TelkomCare portal returned HTTP 500 / internal server error."
+                    )
+                elif mrtg_error:
+                    details_lines.append(
+                        f"MRTG Netcare scraping failed during the 22:00 WIB run: {mrtg_error}"
+                    )
+                else:
+                    details_lines.append(
+                        "MRTG Netcare scraping failed during the 22:00 WIB run "
+                        "(no samples returned)."
+                    )
+            issue_details = " ".join(details_lines)
+
+            logger.warning(
+                "Deferred retry: %s for %s. Report delivery deferred to retry slots: %s",
+                issue_title,
+                date_iso,
+                ", ".join(RETRY_SLOTS_WIB),
+            )
+            if notifier is not None:
+                notifier.send_pipeline_delayed(
+                    target_date_str=date_str,
+                    issue_title=issue_title,
+                    issue_details=issue_details,
+                    current_time_str=datetime.now().strftime("%d %B %Y %H:%M WIB"),
+                    retry_slots=RETRY_SLOTS_WIB,
+                    next_retry_str=RETRY_SLOTS_WIB[0],
+                    test_mode=test_mode,
+                )
+
+            # Re-attempt ONLY the failed collector(s) at each scheduled slot.
+            recovered = False
+            for slot_idx, slot in enumerate(RETRY_SLOTS_WIB):
+                _wait_until_slot(slot)
+                logger.info(
+                    "Deferred retry: re-attempting failed collector(s) at slot %s (%s)",
+                    slot,
+                    date_iso,
+                )
+
+                # Re-attempt CMP only if it previously failed
+                if (
+                    not cmp_success
+                    and cfg.cmp.enabled
+                    and cfg.cmp.username
+                    and cfg.cmp.email
+                ):
+                    try:
+                        retry_cmp_result = run_cmp_crawler(
+                            base_url=cfg.cmp.base_url or "https://ep.iotcc.telkomsel.com",
+                            username=cfg.cmp.username,
+                            password=cfg.cmp.password,
+                            target_date=target_dt.strftime("%Y-%m-%d"),
+                            target_month=target_dt.strftime("%Y-%m"),
+                            output_dir=cfg.output_root,
+                            headless=cfg.cmp.headless,
+                            timeout_seconds=cfg.cmp.timeout_seconds,
+                            export_timeout_seconds=cfg.cmp.export_timeout_seconds,
+                            imap_host=cfg.cmp.imap_host,
+                            imap_port=cfg.cmp.imap_port,
+                            email=cfg.cmp.email,
+                            email_password=cfg.cmp.email_password,
+                            otp_timeout_seconds=cfg.cmp.otp_timeout_seconds,
+                            otp_poll_interval_seconds=cfg.cmp.otp_poll_interval_seconds,
+                            proxy_server=cfg.cmp.proxy_server,
+                            warp_proxy_server=cfg.warp.proxy_server,
+                            monthly_export_enabled=cfg.cmp.monthly_export_enabled,
                         )
-                        if notifier is not None:
-                            notifier.send_pipeline_delayed(
-                                target_date_str=date_str,
-                                issue_title="TelkomCare Portal Down (Error 500)",
-                                issue_details=(
-                                    "MRTG Netcare scraping failed during the 22:00 WIB run "
-                                    "because the portal returned HTTP 500 / internal server error."
-                                ),
-                                current_time_str=datetime.now().strftime("%d %B %Y %H:%M WIB"),
-                                retry_slots=RETRY_SLOTS_WIB,
-                                next_retry_str=RETRY_SLOTS_WIB[0],
-                                test_mode=test_mode,
+                        cmp_crawler_result = retry_cmp_result
+                        cmp_success = (
+                            cmp_crawler_result is None
+                            or cmp_crawler_result.error is None
+                        )
+                        if cmp_crawler_result and cmp_crawler_result.error:
+                            logger.warning(
+                                "CMP crawler retry error at %s: %s", slot, cmp_crawler_result.error
                             )
-                        # Re-attempt ONLY Netcare MRTG at each scheduled slot; other
-                        # collectors remain cached from the first pass.
-                        recovered = False
-                        for slot_idx, slot in enumerate(RETRY_SLOTS_WIB):
-                            _wait_until_slot(slot)
-                            logger.info(
-                                "Deferred retry: re-attempting Netcare MRTG at slot %s (%s)",
-                                slot,
-                                date_iso,
+                    except Exception as exc:
+                        logger.error(
+                            "Deferred retry CMP crawler at %s failed: %s", slot, exc
+                        )
+
+                # Re-attempt MRTG only if it previously failed
+                if not mrtg_success and cfg.netcare.enabled:
+                    targets_retry = build_targets_from_circuits(circuits)
+                    if targets_retry:
+                        try:
+                            retry_samples = _run_netcare_capture(
+                                cfg,
+                                circuits,
+                                target_date,
+                                output_dir=mrtg_output_dir,
                             )
-                            try:
-                                retry_samples = _run_netcare_capture(
-                                    cfg,
-                                    circuits,
-                                    target_date,
-                                    output_dir=mrtg_output_dir,
-                                )
-                                portal_down_now = all(
+                            if retry_samples is not None:
+                                mrtg_samples = retry_samples
+                                portal_down = all(
                                     s.error and "portal_down_500" in s.error
                                     for s in retry_samples
                                 )
-                                if not portal_down_now:
-                                    mrtg_samples = retry_samples
-                                    recovered = True
-                                    logger.info(
-                                        "Deferred retry: Netcare MRTG recovered at slot %s", slot
-                                    )
-                                    break
-                                else:
-                                    mrtg_samples = retry_samples
-                                    logger.warning(
-                                        "Deferred retry: portal still down at slot %s", slot
-                                    )
-                            except Exception as exc:
-                                logger.error(
-                                    "Deferred retry attempt at %s failed: %s", slot, exc
+                                mrtg_success = not portal_down
+                                if portal_down:
+                                    mrtg_portal_down = True
+                                logger.info(
+                                    "Deferred retry: MRTG Netcare re-attempted at slot %s", slot
                                 )
-
-                        if recovered:
-                            mrtg_portal_down = False
-                        else:
-                            # Final deadline reached: finalize report with downtime notation.
-                            logger.warning(
-                                "Deferred retry: final deadline (00:00 WIB) reached; portal still down. "
-                                "Finalizing report with TelkomCare downtime notation."
+                            else:
+                                logger.warning(
+                                    "Deferred retry: MRTG Netcare returned no samples at slot %s",
+                                    slot,
+                                )
+                        except Exception as exc:
+                            logger.error(
+                                "Deferred retry MRTG Netcare at %s failed: %s", slot, exc
                             )
+
+                # All previously failed collectors recovered?
+                if cmp_success and mrtg_success:
+                    recovered = True
+                    logger.info(
+                        "Deferred retry: all failed collectors recovered at slot %s", slot
+                    )
+                    break
+
+            if recovered:
+                mrtg_portal_down = False
+            else:
+                # Final deadline (00:00 WIB) reached: failures persist.
+                logger.warning(
+                    "Deferred retry: final deadline (00:00 WIB) reached; failures persist. "
+                    "Finalizing report with failure/maintenance notes."
+                )
 
         mrtg_payload = _build_mrtg_payload(circuits, cfg, date_iso, date_compact)
         all_circuits = [c for grp in mrtg_payload.values() for c in grp]
@@ -790,6 +898,7 @@ def run_daily_pipeline(
             "hardware_fault": hardware_fault_text,
             "problem_open": "-",
             "mrtg_downtime": mrtg_portal_down,
+            "cmp_error": cmp_crawler_result.error if cmp_crawler_result else None,
         }
 
         wac_dict = None

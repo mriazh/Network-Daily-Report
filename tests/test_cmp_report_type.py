@@ -8,6 +8,7 @@ import pytest
 from network_report.collectors.cmp_crawler import (
     _set_report_type_and_date,
     compute_monthly_date_range,
+    get_otp_from_email,
     select_report_type,
 )
 
@@ -816,3 +817,36 @@ def test_cmp_monthly_export_setting_and_skip_behavior(monkeypatch, tmp_path, cap
     assert [c[0] for c in set_report_calls] == ["Daily", "Monthly"]
     assert res_on.daily_file is not None
     assert res_on.monthly_file is not None
+
+
+def test_get_otp_from_email_accepts_proxy_server():
+    """get_otp_from_email accepts proxy_server parameter (default None)."""
+    import inspect
+
+    sig = inspect.signature(get_otp_from_email)
+    assert "proxy_server" in sig.parameters
+    assert sig.parameters["proxy_server"].default is None
+
+
+def test_get_otp_from_email_socks_unavailable_falls_back(monkeypatch):
+    """When socks is not importable, get_otp_from_email falls back to direct IMAP."""
+    original_import = __import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "socks":
+            raise ImportError("No module named 'socks'")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+
+    # Should not raise; returns None because IMAP connection fails
+    result = get_otp_from_email(
+        imap_host="imap.example.com",
+        imap_port=993,
+        email="user@example.com",
+        email_password="password",
+        proxy_server="socks5://127.0.0.1:40000",
+        timeout_seconds=1,
+        poll_interval_seconds=0,
+    )
+    assert result is None

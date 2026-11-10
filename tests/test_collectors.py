@@ -382,6 +382,51 @@ def test_wag_orbit_lists_all_twelve_modems_with_no_package_marker():
     assert "12. Modem 12: Kuota: - (No Active Package)" in msg
 
 
+def test_wag_orbit_uses_aggregated_quota_fields_when_present():
+    """Section E uses total_remaining_gb / total_quota_gb / earliest_expiry_str from modem dicts."""
+    orbit = [
+        {
+            "location": "Modem 1",
+            "total_remaining_gb": 45.5,
+            "total_quota_gb": 90.0,
+            "earliest_expiry_str": "15 Nov 2026",
+            "packages": [
+                {"remaining_gb": 20.5, "total_gb": 50.0, "expiry_str": "15 Nov 2026"},
+                {"remaining_gb": 25.0, "total_gb": 40.0, "expiry_str": "20 Nov 2026"},
+            ],
+        },
+        {
+            "location": "Modem 2",
+            "total_remaining_gb": 0.0,
+            "total_quota_gb": 0.0,
+            "packages": [],
+        },
+    ]
+
+    msg = format_whatsapp_report({"orbit": orbit})
+    assert "*E. 📱 Modem Orbit*" in msg
+    # Modem 1: uses aggregated 45.5 / 90.0 GB (not just packages[0] which is 20.5 / 50.0)
+    assert "1. Modem 1: Kuota: 45.5 GB / 90.0 GB (Exp: 15 Nov 2026)" in msg
+    # Modem 2: both zero -> No Active Package
+    assert "2. Modem 2: Kuota: - (No Active Package)" in msg
+
+
+def test_wag_orbit_falls_back_to_packages_when_top_level_missing():
+    """Legacy payloads without top-level quota fields fall back to summing packages."""
+    orbit = [
+        {
+            "location": "Modem 1",
+            "packages": [
+                {"remaining_gb": 10.0, "total_gb": 30.0, "expiry_str": "10 Oct 2026"},
+                {"remaining_gb": 5.0, "total_gb": 20.0, "expiry_str": "12 Oct 2026"},
+            ],
+        }
+    ]
+
+    msg = format_whatsapp_report({"orbit": orbit})
+    assert "1. Modem 1: Kuota: 15.0 GB / 50.0 GB (Exp: 10 Oct 2026)" in msg
+
+
 def test_iot_summary_reads_raw_files_from_date_subdirs(tmp_path: Path):
     """CMP exports archived under raw/{YYYYMMDD}/ must still be picked up. Total usage is 0.0 without dashboard image."""
     raw_dir = tmp_path / "raw"

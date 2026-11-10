@@ -391,6 +391,12 @@ def convert_to_orbit_modem_items(results: list[OrbitModemResult]) -> list[dict[s
             {
                 "location": r.target.name,
                 "ssid": r.target.ssid,
+                "total_remaining_gb": r.total_remaining_gb,
+                "total_quota_gb": r.total_quota_gb,
+                "earliest_expiry_str": min(
+                    (p.expiry_str for p in r.packages if p.expiry_str != "-"),
+                    default=None,
+                ),
                 "packages": [
                     {
                         "name": p.name,

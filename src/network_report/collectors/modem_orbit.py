@@ -25,6 +25,9 @@ class OrbitModem:
     location: str
     ssid: str
     packages: list[OrbitPackage]
+    total_remaining_gb: float = 0.0
+    total_quota_gb: float = 0.0
+    earliest_expiry_str: str | None = None
 
 
 def _load_report_modem_names(circuits_file: Path) -> list[str]:
@@ -84,6 +87,11 @@ def _parse_cached_data(data: list[dict], report_names: list[str]) -> list[OrbitM
 
     grouped: dict[int, list[OrbitPackage]] = {slot: [] for slot in range(len(report_names))}
     grouped_ssid: dict[int, str] = {}
+    # Top-level quota/expiry fields from modems.json (per slot)
+    grouped_rem: dict[int, float] = {slot: 0.0 for slot in range(len(report_names))}
+    grouped_tot: dict[int, float] = {slot: 0.0 for slot in range(len(report_names))}
+    grouped_exp: dict[int, str | None] = {slot: None for slot in range(len(report_names))}
+    has_top_level: dict[int, bool] = {slot: False for slot in range(len(report_names))}
 
     for item in data:
         target = item.get("target", {})
@@ -91,6 +99,16 @@ def _parse_cached_data(data: list[dict], report_names: list[str]) -> list[OrbitM
         ssid = target.get("ssid", "")
         slot = slot_of_target_no.get(t_no, 0)
         grouped_ssid[slot] = ssid
+
+        # Populate top-level quota/expiry directly from modems.json when present
+        item_rem = float(item.get("total_remaining_gb", 0.0) or 0.0)
+        item_tot = float(item.get("total_quota_gb", 0.0) or 0.0)
+        item_exp = item.get("earliest_expiry_str")
+        if item_rem > 0 or item_tot > 0 or item_exp:
+            grouped_rem[slot] = item_rem
+            grouped_tot[slot] = item_tot
+            grouped_exp[slot] = item_exp
+            has_top_level[slot] = True
 
         for p in item.get("packages", []):
             rem = float(p.get("remaining_gb", 0.0))
@@ -109,11 +127,24 @@ def _parse_cached_data(data: list[dict], report_names: list[str]) -> list[OrbitM
     modems: list[OrbitModem] = []
     for slot_idx, rep_name in enumerate(report_names):
         pkgs = grouped.get(slot_idx, [])
+        if has_top_level[slot_idx]:
+            total_remaining = grouped_rem[slot_idx]
+            total_quota = grouped_tot[slot_idx]
+            earliest_expiry = grouped_exp[slot_idx]
+        else:
+            # Fallback: compute from packages (legacy cache without top-level fields)
+            total_remaining = sum(p.remaining_gb for p in pkgs)
+            total_quota = sum(p.total_gb for p in pkgs)
+            expiries = [p.expiry_str for p in pkgs if p.expiry_str != "-"]
+            earliest_expiry = min(expiries) if expiries else None
         modems.append(
             OrbitModem(
                 location=rep_name,
                 ssid=grouped_ssid.get(slot_idx, ""),
                 packages=pkgs,
+                total_remaining_gb=total_remaining,
+                total_quota_gb=total_quota,
+                earliest_expiry_str=earliest_expiry,
             )
         )
 
@@ -144,6 +175,10 @@ def _parse_native_results(data: list[dict], report_names: list[str]) -> list[Orb
     # display names (four idle modems) that would otherwise collapse together.
     grouped: dict[int, list[OrbitPackage]] = {slot: [] for slot in range(len(report_names))}
     grouped_ssid: dict[int, str] = {}
+    grouped_rem: dict[int, float] = {slot: 0.0 for slot in range(len(report_names))}
+    grouped_tot: dict[int, float] = {slot: 0.0 for slot in range(len(report_names))}
+    grouped_exp: dict[int, str | None] = {slot: None for slot in range(len(report_names))}
+    has_top_level: dict[int, bool] = {slot: False for slot in range(len(report_names))}
 
     for i, item in enumerate(data):
         target = item.get("target", {})
@@ -161,6 +196,16 @@ def _parse_native_results(data: list[dict], report_names: list[str]) -> list[Orb
             continue
         grouped_ssid[slot] = ssid
 
+        # Populate top-level quota/expiry directly from modems.json when present
+        item_rem = float(item.get("total_remaining_gb", 0.0) or 0.0)
+        item_tot = float(item.get("total_quota_gb", 0.0) or 0.0)
+        item_exp = item.get("earliest_expiry_str")
+        if item_rem > 0 or item_tot > 0 or item_exp:
+            grouped_rem[slot] = item_rem
+            grouped_tot[slot] = item_tot
+            grouped_exp[slot] = item_exp
+            has_top_level[slot] = True
+
         for p in item.get("packages", []):
             rem = float(p.get("remaining_gb", 0.0))
             tot = float(p.get("total_gb", 0.0))
@@ -177,11 +222,25 @@ def _parse_native_results(data: list[dict], report_names: list[str]) -> list[Orb
 
     modems: list[OrbitModem] = []
     for slot, rep_name in enumerate(report_names):
+        pkgs = grouped.get(slot, [])
+        if has_top_level[slot]:
+            total_remaining = grouped_rem[slot]
+            total_quota = grouped_tot[slot]
+            earliest_expiry = grouped_exp[slot]
+        else:
+            # Fallback: compute from packages (legacy cache without top-level fields)
+            total_remaining = sum(p.remaining_gb for p in pkgs)
+            total_quota = sum(p.total_gb for p in pkgs)
+            expiries = [p.expiry_str for p in pkgs if p.expiry_str != "-"]
+            earliest_expiry = min(expiries) if expiries else None
         modems.append(
             OrbitModem(
                 location=rep_name,
                 ssid=grouped_ssid.get(slot, ""),
-                packages=grouped.get(slot, []),
+                packages=pkgs,
+                total_remaining_gb=total_remaining,
+                total_quota_gb=total_quota,
+                earliest_expiry_str=earliest_expiry,
             )
         )
 

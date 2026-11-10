@@ -280,19 +280,31 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
             ]
         )
         for idx, m in enumerate(orbit, 1):
-            pkgs = m.get("packages", [])
-            active = [p for p in pkgs if p] if pkgs else []
-            if not active:
+            # Prefer aggregated quota fields from modems.json; fall back to
+            # summing packages for legacy payloads without top-level fields.
+            total_remaining = m.get("total_remaining_gb")
+            total_quota = m.get("total_quota_gb")
+            expiry = m.get("earliest_expiry_str")
+
+            if total_remaining is None or total_quota is None:
+                pkgs = m.get("packages", [])
+                active = [p for p in pkgs if p] if pkgs else []
+                total_remaining = sum(float(p.get("remaining_gb", 0.0) or 0.0) for p in active)
+                total_quota = sum(float(p.get("total_gb", 0.0) or 0.0) for p in active)
+                if expiry is None:
+                    expiries = [p.get("expiry_str") for p in active if p.get("expiry_str") and p.get("expiry_str") != "-"]
+                    expiry = min(expiries) if expiries else None
+
+            total_remaining = float(total_remaining or 0.0)
+            total_quota = float(total_quota or 0.0)
+
+            if total_remaining == 0.0 and total_quota == 0.0:
                 p_text = "Kuota: - (No Active Package)"
             else:
-                p = active[0]
-                rem = p.get("remaining_gb")
-                tot = p.get("total_gb")
-                exp = p.get("expiry_str")
-                if exp:
-                    p_text = f"Kuota: {rem} GB / {tot} GB (Exp: {exp})"
+                if expiry:
+                    p_text = f"Kuota: {total_remaining} GB / {total_quota} GB (Exp: {expiry})"
                 else:
-                    p_text = f"Kuota: {rem} GB / {tot} GB"
+                    p_text = f"Kuota: {total_remaining} GB / {total_quota} GB"
             lines.append(f"{idx}. {m.get('location')}: {p_text}")
 
     lines.extend(
@@ -317,6 +329,17 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
                 "Portal Downtime Notation: TelkomCare MRTG portal remained unreachable "
                 "(HTTP 500) through the final retry deadline (00:00 WIB). MRTG circuits "
                 "are reported as Portal Down (Error 500) with no utilization data.",
+            ]
+        )
+
+    cmp_error = highlights.get("cmp_error")
+    if cmp_error:
+        lines.extend(
+            [
+                "",
+                "Collector Failure Notion: Telkomsel CMP M2M crawler failed during the "
+                "22:00 WIB run and did not recover through the final retry deadline. "
+                f"Error: {cmp_error}",
             ]
         )
 

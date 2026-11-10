@@ -149,7 +149,7 @@ def test_deferred_retry_sends_delayed_notice_and_retries(monkeypatch, tmp_path):
 
     recorder.send_pipeline_delayed.assert_called_once()
     delay_kwargs = recorder.send_pipeline_delayed.call_args.kwargs
-    assert delay_kwargs["issue_title"] == "TelkomCare Portal Down (Error 500)"
+    assert delay_kwargs["issue_title"] == "MRTG Scrape Failed"
     assert delay_kwargs["retry_slots"] == ["22:30", "23:00", "23:30", "00:00"]
     assert delay_kwargs["next_retry_str"] == "22:30"
     assert delay_kwargs["test_mode"] is False
@@ -213,6 +213,128 @@ def test_deferred_retry_final_deadline_portal_still_down(monkeypatch, tmp_path):
     payload = result["payload"]
     assert payload.get("mrtg_error") is not None
     assert "500" in payload["mrtg_error"] or "portal down" in payload["mrtg_error"].lower()
+
+
+def test_deferred_retry_cmp_failure_triggers_retry(monkeypatch, tmp_path):
+    """Deferred retry: CMP crawler fails -> delayed notice -> retry recovers -> report sent."""
+    import network_report.pipeline as pipeline
+    from network_report.collectors.cmp_crawler import CmpExportResult
+
+    cfg = _base_cfg(tmp_path)
+    cfg.cmp.enabled = True
+    cfg.cmp.username = "user"
+    cfg.cmp.password = "pass"
+    cfg.cmp.email = "user@example.com"
+    cfg.cmp.imap_host = "imap.example.com"
+    cfg.cmp.imap_port = 993
+    cfg.netcare.enabled = False  # only CMP fails
+
+    recorder = MagicMock()
+    recorder.send_pipeline_delayed.return_value = True
+    recorder.send_report.return_value = True
+    recorder.send_success.return_value = True
+
+    cmp_calls = {"count": 0}
+
+    def fake_run_cmp_crawler(*args, **kwargs):
+        cmp_calls["count"] += 1
+        result = CmpExportResult()
+        if cmp_calls["count"] == 1:
+            result.error = "Login failed"
+        return result
+
+    monkeypatch.setattr(pipeline, "load_config", lambda: cfg)
+    monkeypatch.setattr(pipeline, "GowaNotifier", lambda settings: recorder)
+    monkeypatch.setattr(pipeline, "_archive_raw_artifacts", lambda **kw: None)
+    monkeypatch.setattr(pipeline, "run_cmp_crawler", fake_run_cmp_crawler)
+    monkeypatch.setattr(pipeline, "_wait_until_slot", lambda slot: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_build_mrtg_payload",
+        lambda circuits, cfg, date_iso, date_compact: {"ASTINET": []},
+    )
+    _stub_collectors(monkeypatch, pipeline)
+
+    result = pipeline.run_daily_pipeline(
+        date_input="today", send_wa=True, test_mode=False, o_deferred_retry=True
+    )
+
+    recorder.send_pipeline_delayed.assert_called_once()
+    delay_kwargs = recorder.send_pipeline_delayed.call_args.kwargs
+    assert "CMP M2M Crawler Failed" in delay_kwargs["issue_title"]
+    assert cmp_calls["count"] == 2  # initial + 1 retry at first slot
+    assert result["wa_sent"] is True
+
+
+def test_deferred_retry_both_collectors_fail(monkeypatch, tmp_path):
+    """Deferred retry: both CMP and MRTG fail -> both retried independently."""
+    import network_report.pipeline as pipeline
+    from network_report.collectors.cmp_crawler import CmpExportResult
+    from network_report.collectors.netcare_mrtg import MrtgSample
+
+    cfg = _base_cfg(tmp_path)
+    cfg.cmp.enabled = True
+    cfg.cmp.username = "user"
+    cfg.cmp.password = "pass"
+    cfg.cmp.email = "user@example.com"
+    cfg.cmp.imap_host = "imap.example.com"
+    cfg.cmp.imap_port = 993
+
+    recorder = MagicMock()
+    recorder.send_pipeline_delayed.return_value = True
+    recorder.send_report.return_value = True
+    recorder.send_success.return_value = True
+
+    portal_down_samples = [
+        MrtgSample(target_id="1000001-0000000001", error="portal_down_500"),
+    ]
+    recovered_samples = [
+        MrtgSample(
+            target_id="1000001-0000000001",
+            inbound_maximum="10.0 M",
+            outbound_maximum="5.0 M",
+        ),
+    ]
+
+    cmp_calls = {"count": 0}
+    mrtg_calls = {"count": 0}
+
+    def fake_run_cmp_crawler(*args, **kwargs):
+        cmp_calls["count"] += 1
+        result = CmpExportResult()
+        if cmp_calls["count"] == 1:
+            result.error = "Login failed"
+        return result
+
+    def fake_run_netcare_capture(cfg, circuits, target_date, output_dir):
+        mrtg_calls["count"] += 1
+        return portal_down_samples if mrtg_calls["count"] == 1 else recovered_samples
+
+    monkeypatch.setattr(pipeline, "load_config", lambda: cfg)
+    monkeypatch.setattr(pipeline, "GowaNotifier", lambda settings: recorder)
+    monkeypatch.setattr(pipeline, "_archive_raw_artifacts", lambda **kw: None)
+    monkeypatch.setattr(pipeline, "run_cmp_crawler", fake_run_cmp_crawler)
+    monkeypatch.setattr(pipeline, "_run_netcare_capture", fake_run_netcare_capture)
+    monkeypatch.setattr(pipeline, "_wait_until_slot", lambda slot: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_build_mrtg_payload",
+        lambda circuits, cfg, date_iso, date_compact: {"ASTINET": []},
+    )
+    _stub_collectors(monkeypatch, pipeline)
+
+    result = pipeline.run_daily_pipeline(
+        date_input="today", send_wa=True, test_mode=False, o_deferred_retry=True
+    )
+
+    recorder.send_pipeline_delayed.assert_called_once()
+    delay_kwargs = recorder.send_pipeline_delayed.call_args.kwargs
+    assert "CMP M2M Crawler Failed" in delay_kwargs["issue_title"]
+    assert "MRTG Scrape Failed" in delay_kwargs["issue_title"]
+    # Both collectors retried at first slot, both recover
+    assert cmp_calls["count"] == 2
+    assert mrtg_calls["count"] == 2
+    assert result["wa_sent"] is True
 
 
 def test_deferred_retry_skipped_when_flag_off(monkeypatch, tmp_path):

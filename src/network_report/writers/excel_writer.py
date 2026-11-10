@@ -255,28 +255,37 @@ def write_daily_excel(
     orbit_modems = payload.get("orbit", [])
     row = 152
     for modem in orbit_modems:
-        packages = modem.get("packages", [])
-        for pkg in packages:
-            if row > 163:
-                break
-            put(row, 4, pkg.get("remaining_gb"))  # Remaining Quota col D
-            put(row, 5, pkg.get("total_gb"))  # Total Quota col E
-            put(row, 6, pkg.get("expiry_str"))  # Valid Until col F
-            # Status: derive from remaining/total and expiry
-            remaining = pkg.get("remaining_gb", 0)
-            total = pkg.get("total_gb", 0)
-            if total > 0:
-                pct = (remaining / total) * 100
-                if pct <= 0:
-                    status = "Expired"
-                elif pct <= 10:
-                    status = "Expired Soon"
-                else:
-                    status = "Active"
+        if row > 163:
+            break
+        total_remaining = float(modem.get("total_remaining_gb") or 0.0)
+        total_quota = float(modem.get("total_quota_gb") or 0.0)
+        expiry = modem.get("earliest_expiry_str")
+
+        # Fallback: compute from packages for legacy payloads without top-level fields
+        if total_remaining == 0.0 and total_quota == 0.0:
+            pkgs = modem.get("packages", [])
+            total_remaining = sum(float(p.get("remaining_gb", 0.0) or 0.0) for p in pkgs)
+            total_quota = sum(float(p.get("total_gb", 0.0) or 0.0) for p in pkgs)
+            if expiry is None:
+                expiries = [p.get("expiry_str") for p in pkgs if p.get("expiry_str") and p.get("expiry_str") != "-"]
+                expiry = min(expiries) if expiries else None
+
+        put(row, 4, total_remaining)  # Remaining Quota col D
+        put(row, 5, total_quota)  # Total Quota col E
+        put(row, 6, expiry or "-")  # Valid Until col F
+        # Status: derive from remaining/total and expiry
+        if total_quota > 0:
+            pct = (total_remaining / total_quota) * 100
+            if pct <= 0:
+                status = "Expired"
+            elif pct <= 10:
+                status = "Expired Soon"
             else:
-                status = "Unknown"
-            put(row, 7, status)  # Status col G
-            row += 1
+                status = "Active"
+        else:
+            status = "Unknown"
+        put(row, 7, status)  # Status col G
+        row += 1
 
     # Section F: Highlights
     highlights = payload.get("highlights", {})

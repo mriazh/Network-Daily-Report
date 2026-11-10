@@ -8,10 +8,12 @@ from email.utils import parsedate_to_datetime
 import imaplib
 import logging
 import os
+import ssl
 from pathlib import Path
 import re
 import sys
 import time
+import urllib.parse
 from dataclasses import dataclass
 
 from playwright.sync_api import Page, sync_playwright
@@ -158,6 +160,159 @@ def _fetch_otp_from_imap(
     return None
 
 
+def get_otp_from_email(
+    imap_host: str,
+    imap_port: int,
+    email: str,
+    email_password: str,
+    proxy_server: str | None = None,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: int = 5,
+    start_time: float | None = None,
+) -> str | None:
+    """
+    Connect to IMAP and retrieve the 6-digit OTP from email subject 'CMP - YOUR TOKEN'.
+
+    Supports an optional SOCKS5 proxy (e.g. "socks5://127.0.0.1:40000") for IMAP
+    connections that time out on direct routing. When proxy_server is provided the
+    connection is established via socks.socksocket wrapped with
+    ssl.create_default_context().wrap_socket(sock, server_hostname=imap_host).
+    If socks is not installed or the proxy connection fails, a debug/warning is
+    logged and a direct IMAP connection is attempted as fallback.
+
+    Args:
+        imap_host: IMAP server host
+        imap_port: IMAP server port (typically 993 for SSL)
+        email: Email address
+        email_password: Email password
+        proxy_server: Optional SOCKS5 proxy URL (e.g. "socks5://127.0.0.1:40000")
+        timeout_seconds: Total time to wait for OTP
+        poll_interval_seconds: Time between IMAP polls
+        start_time: Epoch timestamp marking login start (freshness cutoff)
+
+    Returns:
+        6-digit OTP string or None if not found within timeout
+    """
+    if not all([imap_host, email, email_password]):
+        logger.warning("IMAP credentials incomplete; skipping OTP retrieval")
+        return None
+
+    if start_time is None:
+        start_time = time.time()
+    cutoff = start_time - 30
+
+    deadline = time.time() + timeout_seconds
+    subject_pattern = re.compile(r"CMP\s*-\s*YOUR\s*TOKEN", re.IGNORECASE)
+    otp_pattern = re.compile(r"\b(\d{6})\b")
+
+    def _try_direct() -> imaplib.IMAP4_SSL | None:
+        """Attempt a direct IMAP4_SSL connection."""
+        try:
+            return imaplib.IMAP4_SSL(imap_host, imap_port)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Direct IMAP connection failed: %s", exc)
+            return None
+
+    def _try_proxy() -> imaplib.IMAP4_SSL | None:
+        """Attempt an IMAP4_SSL connection via SOCKS5 proxy."""
+        try:
+            import socks  # type: ignore[import-not-found]
+        except ImportError:
+            logger.warning("PySocks not installed; falling back to direct IMAP connection")
+            return None
+
+        proxy_url = proxy_server if "://" in proxy_server else f"socks5://{proxy_server}"
+        parsed = urllib.parse.urlparse(proxy_url)
+        proxy_host = parsed.hostname or "127.0.0.1"
+        proxy_port = parsed.port or 1080
+
+        class _SocksIMAP4_SSL(imaplib.IMAP4_SSL):
+            def _create_socket(self, timeout):
+                sock = socks.socksocket()
+                sock.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
+                if timeout is not None:
+                    sock.settimeout(timeout)
+                sock.connect((self.host, self.port))
+                ctx = self.ssl_context or ssl.create_default_context()
+                return ctx.wrap_socket(sock, server_hostname=self.host)
+
+        try:
+            return _SocksIMAP4_SSL(imap_host, imap_port, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SOCKS5 proxy IMAP connection failed: %s", exc)
+            return None
+
+    while time.time() < deadline:
+        mail = None
+        if proxy_server:
+            mail = _try_proxy()
+            if mail is None:
+                mail = _try_direct()
+        else:
+            mail = _try_direct()
+
+        if mail is None:
+            time.sleep(poll_interval_seconds)
+            continue
+
+        try:
+            mail.login(email, email_password)
+            mail.select("INBOX", readonly=True)
+
+            typ, data = mail.search(None, "SUBJECT", "CMP")
+            if typ != "OK" or not data[0]:
+                logger.debug("No emails with 'CMP' in subject found")
+            else:
+                email_ids = data[0].split()[-10:]
+                for eid in reversed(email_ids):
+                    typ, msg_data = mail.fetch(eid, "(RFC822)")
+                    if typ != "OK":
+                        continue
+                    msg = email_lib.message_from_bytes(msg_data[0][1])
+                    date_str = msg.get("Date", "")
+                    try:
+                        msg_date = parsedate_to_datetime(date_str)
+                        if msg_date.tzinfo is not None:
+                            msg_date_epoch = msg_date.timestamp()
+                        else:
+                            msg_date_epoch = msg_date.astimezone().timestamp()
+                    except Exception:
+                        continue
+
+                    if msg_date_epoch < cutoff:
+                        continue
+
+                    subject = msg.get("Subject", "")
+                    if subject_pattern.search(subject):
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain":
+                                    body += part.get_payload(decode=True).decode(
+                                        errors="ignore"
+                                    )
+                        else:
+                            body = msg.get_payload(decode=True).decode(errors="ignore")
+
+                        match = otp_pattern.search(body)
+                        if match:
+                            otp = match.group(1)
+                            logger.info("Retrieved OTP from email: %s", otp)
+                            return otp
+        except (imaplib.IMAP4.error, OSError, UnicodeDecodeError, KeyError) as e:
+            logger.debug("IMAP fetch attempt failed: %s", e)
+        finally:
+            try:
+                mail.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+        time.sleep(poll_interval_seconds)
+
+    logger.warning("OTP not found within %d seconds", timeout_seconds)
+    return None
+
+
 def _wait_for_download(page: Page, timeout: int = 60000) -> Path | None:
     """Wait for a download to complete and return the file path."""
     try:
@@ -189,6 +344,7 @@ def _login_cmp(
     email_password: str = "",
     otp_timeout_seconds: int = 120,
     otp_poll_interval_seconds: int = 5,
+    proxy_server: str = "",
 ) -> bool:
     """Login to CMP portal with CAS and OTP handling."""
     try:
@@ -256,12 +412,13 @@ def _login_cmp(
                 break
 
         if otp_page_detected:
-            # Retrieve OTP from email
-            otp = _fetch_otp_from_imap(
+            # Retrieve OTP from email (with optional SOCKS5 proxy fallback)
+            otp = get_otp_from_email(
                 imap_host=imap_host,
                 imap_port=imap_port,
                 email=email,
                 email_password=email_password,
+                proxy_server=proxy_server,
                 timeout_seconds=otp_timeout_seconds,
                 poll_interval_seconds=otp_poll_interval_seconds,
                 start_time=login_start,
@@ -1295,6 +1452,7 @@ def run_cmp_crawler(
                         email_password=email_password,
                         otp_timeout_seconds=otp_timeout_seconds,
                         otp_poll_interval_seconds=otp_poll_interval_seconds,
+                        proxy_server=resolved_proxy,
                     ):
                         raise RuntimeError("Login failed")
 
