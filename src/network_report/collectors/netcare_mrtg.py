@@ -788,6 +788,9 @@ class NetcareScraper:
         pdir = profile_subpath or self.profile_dir
         if pdir:
             pdir.mkdir(parents=True, exist_ok=True)
+            for f in pdir.glob('Singleton*'):
+                with contextlib.suppress(Exception):
+                    f.unlink()
             options.add_argument(f"--user-data-dir={pdir}")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
