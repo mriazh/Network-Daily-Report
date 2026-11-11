@@ -244,6 +244,58 @@ def test_sample_ap_with_collector_error(monkeypatch, tmp_path, capsys):
     assert "AP Sampler failed: login failed" in captured.out
 
 
+def test_sample_ap_idempotency_guard_skips_when_snapshot_exists(monkeypatch, tmp_path, capsys):
+    """Verify sample-ap skips crawling if 14:00 snapshot already exists and --force is not set."""
+    cfg = _cfg(tmp_path)
+    ap_dir = cfg.output_raw_root / "huawei_ap" / "20261012"
+    ap_dir.mkdir(parents=True, exist_ok=True)
+    (ap_dir / "snapshot_1400.json").write_text('{"source": "14:00 WIB"}', encoding="utf-8")
+    (ap_dir / "apInfo.csv").write_text("AP Name,Status\nAP-01,Normal\n", encoding="utf-8")
+
+    monkeypatch.setattr("network_report.cli.load_config", lambda: cfg)
+
+    from network_report.collectors.huawei_nce import NceCollector
+    mock_collector = MagicMock(spec=NceCollector)
+    monkeypatch.setattr("network_report.collectors.huawei_nce.NceCollector", lambda **kw: mock_collector)
+
+    code = main(["sample-ap", "--date", "2026-10-12"])
+    assert code == 0
+
+    # Collector MUST NOT be called because snapshot already exists
+    mock_collector.collect.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Skipped re-crawling" in captured.out
+
+
+def test_sample_ap_force_flag_overrides_idempotency(monkeypatch, tmp_path, capsys):
+    """Verify sample-ap with --force re-crawls even if 14:00 snapshot exists."""
+    cfg = _cfg(tmp_path)
+    cfg.huawei.enabled = True
+    cfg.huawei.base_url = "https://example.com"
+    cfg.huawei.username = "user"
+    cfg.huawei.password = "pass"
+    cfg.huawei.raw_dir = tmp_path / "raw"
+
+    ap_dir = cfg.output_raw_root / "huawei_ap" / "20261012"
+    ap_dir.mkdir(parents=True, exist_ok=True)
+    (ap_dir / "snapshot_1400.json").write_text('{"source": "14:00 WIB"}', encoding="utf-8")
+    (ap_dir / "apInfo.csv").write_text("AP Name,Status\nAP-01,Normal\n", encoding="utf-8")
+
+    monkeypatch.setattr("network_report.cli.load_config", lambda: cfg)
+
+    from network_report.collectors.huawei_nce import NceCollector, NceExport
+    mock_collector = MagicMock(spec=NceCollector)
+    mock_collector.collect.return_value = NceExport(ap_csv_path=str(ap_dir / "apInfo.csv"))
+    mock_collector.close = MagicMock()
+    monkeypatch.setattr("network_report.collectors.huawei_nce.NceCollector", lambda **kw: mock_collector)
+
+    code = main(["sample-ap", "--date", "2026-10-12", "--force"])
+    assert code == 0
+
+    # Collector MUST be called because --force was passed
+    mock_collector.collect.assert_called_once()
+
+
 def test_run_passed_no_deferred_retry_flag(monkeypatch, tmp_path, capsys):
     """Verify --no-deferred-retry passes o_deferred_retry=False to run_daily_pipeline."""
     captured = {}

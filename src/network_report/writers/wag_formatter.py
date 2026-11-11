@@ -240,8 +240,35 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
         [
             "",
             "7. 📝 Analisa Utilisasi",
-            f"  a. CPU: {payload.get('analysis_cpu', 'Beban normal.')}",
-            f"  b. Memori: {payload.get('analysis_mem', 'Alokasi stabil.')}",
+        ]
+    )
+    analysis_cpu = payload.get("analysis_cpu", "")
+    analysis_mem = payload.get("analysis_mem", "")
+
+    def _is_failed(text: str) -> bool:
+        return not text or "Gagal scrape" in text
+
+    cpu_failed = airwave_err or _is_failed(analysis_cpu)
+    mem_failed = airwave_err or _is_failed(analysis_mem)
+
+    if cpu_failed:
+        lines.append("  a. CPU: ⚠️ Gagal scrape")
+    else:
+        lines.append("  a. CPU:")
+        for idx, line in enumerate(analysis_cpu.splitlines(), 1):
+            if line.strip():
+                lines.append(f"    {idx}.) {line.strip()}")
+
+    if mem_failed:
+        lines.append("  b. Memori: ⚠️ Gagal scrape")
+    else:
+        lines.append("  b. Memori:")
+        for idx, line in enumerate(analysis_mem.splitlines(), 1):
+            if line.strip():
+                lines.append(f"    {idx}.) {line.strip()}")
+
+    lines.extend(
+        [
             "",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"*D. 📶 AP Huawei ({ap.get('source_tag') or ('Data: 14.00 WIB' if ap.get('is_snapshot_1400') else 'Live - Data 14.00 WIB Kosong')})*",

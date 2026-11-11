@@ -203,6 +203,12 @@ def main(argv: list[str] | None = None) -> int:
     ap_sampler_parser.add_argument(
         "--test", action="store_true", help="Include test banner in WhatsApp notification"
     )
+    ap_sampler_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force re-sampling even if 14:00 snapshot already exists",
+    )
 
     args = parser.parse_args(argv)
     cfg = load_config()
@@ -356,6 +362,23 @@ def main(argv: list[str] | None = None) -> int:
         date_compact = target_dt.strftime("%Y%m%d")
 
         print(f"Executing 14:00 WIB Peak Hour AP Sampler for: {date_iso}...")
+
+        # Idempotency guard: skip re-crawling if 14:00 snapshot already exists
+        marker_path = cfg.output_raw_root / "huawei_ap" / date_compact / "snapshot_1400.json"
+        ap_file = cfg.output_raw_root / "huawei_ap" / date_compact / "apInfo.csv"
+        if (
+            not args.force
+            and marker_path.is_file()
+            and ap_file.is_file()
+            and ap_file.stat().st_size > 0
+        ):
+            logger.info(
+                "14:00 WIB AP snapshot for %s already exists (%s). Skipping re-crawling. Use --force to override.",
+                date_iso,
+                ap_file,
+            )
+            print(f"14:00 WIB AP snapshot already exists for {date_iso}. Skipped re-crawling.")
+            return 0
 
         notifier = GowaNotifier(cfg.gowa) if args.send_wa else None
         if notifier is not None:

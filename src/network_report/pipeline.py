@@ -917,6 +917,16 @@ def run_daily_pipeline(
                 "error": wac_status.error,
             }
 
+        # Filter out WLC devices BEFORE slicing [:10] so the top 10 are not
+        # reduced to fewer entries when a WLC device falls inside the top 10.
+        # wag_formatter.py re-filters WLC defensively, so this keeps counts stable.
+        clean_cpu = [
+            item for item in cpu_data if not str(item[0]).upper().startswith("WLC")
+        ]
+        clean_mem = [
+            item for item in mem_data if not str(item[0]).upper().startswith("WLC")
+        ]
+
         # 3. Assemble full payload
         payload = {
             "date_str": date_str,
@@ -963,8 +973,8 @@ def run_daily_pipeline(
             "mrtg_source_date": date_str,
             "airwave_error": airwave_error,
             "airwave_source_date": date_str,
-            "cpu": cpu_data[:10] if not airwave_error else [],
-            "memory": mem_data[:10] if not airwave_error else [],
+            "cpu": clean_cpu[:10] if not airwave_error else [],
+            "memory": clean_mem[:10] if not airwave_error else [],
             "uptime": {
                 "device": airwave_data.device_uptime_pct if airwave_data else None,
                 "snmp": airwave_data.snmp_uptime_pct if airwave_data else None,

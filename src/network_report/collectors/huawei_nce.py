@@ -170,10 +170,14 @@ class NceCollector:
                 self._page.click(self.selectors["nav_ac"])
                 self._page.wait_for_timeout(12000)
 
-                def _get_text(sel: str) -> str:
+                def _get_text(sel: str, use_title: bool = False) -> str:
                     try:
                         el = self._page.locator(sel)
                         if el.count() > 0:
+                            if use_title:
+                                title = el.first.get_attribute("title")
+                                if isinstance(title, str) and title:
+                                    return title
                             return (el.first.inner_text() or "").strip()
                     except Exception as ex:
                         logger.debug("Failed reading selector %s: %s", sel, ex)
@@ -184,7 +188,9 @@ class NceCollector:
                 dev_name = _get_text("#deviceInfo_deviceName")
                 dev_type = _get_text("#deviceInfo_deviceType")
                 temperature = _get_text("#deviceInfo_temperature")
-                running_time = _get_text("#deviceInfo_runningTime")
+                running_time = _get_text("#deviceInfo_runningTime", use_title=True)
+                if running_time.endswith("...") or running_time.endswith("secon..."):
+                    running_time = running_time.rstrip(".").strip()
                 software_version = _get_text("#deviceInfo_softwareVersion")
                 serial_number = _get_text("#deviceInfo_serialNumber")
                 max_ap_count = _get_text("#deviceInfo_maxApCount")
