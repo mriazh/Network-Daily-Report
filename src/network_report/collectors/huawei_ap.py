@@ -200,7 +200,7 @@ def parse_ssid_info_csv(csv_path: Path) -> dict[str, int]:
                 mapped = raw_ssid
 
             if mapped:
-                distribution[mapped] = count
+                distribution[mapped] = distribution.get(mapped, 0) + count
 
     return distribution
 

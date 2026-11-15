@@ -79,6 +79,25 @@ def test_parse_ssid_info_real_format(tmp_path: Path):
     assert dist["VIP"] == 5
 
 
+
+def test_parse_ssid_info_accumulates_across_aps(tmp_path: Path):
+    ssid_csv = tmp_path / "ssidInfo.csv"
+    content = (
+        '\t"SSID"\t,"User Quantity"\n'
+        '"CORP-Employee",100\n'
+        '"CORP-Employee",50\n'
+        '"CORP-Guest",25\n'
+        '"CORP-Guest",15\n'
+        '"CORP-IoT",10\n'
+    )
+    ssid_csv.write_text(content, encoding="utf-8-sig")
+
+    dist = parse_ssid_info_csv(ssid_csv)
+    assert dist["Employee"] == 150
+    assert dist["Guest"] == 40
+    assert dist["IoT"] == 10
+
+
 def test_collect_huawei_ap_data_no_sibling_and_real_fixture(tmp_path: Path):
     source_code = inspect.getsource(collect_huawei_ap_data)
     assert "AP-Report-Auto" not in source_code
