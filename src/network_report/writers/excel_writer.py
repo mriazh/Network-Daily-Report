@@ -249,7 +249,9 @@ def write_daily_excel(
 
     # SSID
     for idx, (ssid, count) in enumerate(ap.get("ssid_distribution", {}).items()):
-        put(139 + idx, 5, count)
+        row = 139 + idx
+        if row < 147:  # Guard: row 147 is =SUM formula for TOTAL USERS
+            put(row, 5, count)
 
     # Section E: Modem Orbit (rows 152-164)
     orbit_modems = payload.get("orbit", [])

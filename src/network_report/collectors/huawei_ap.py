@@ -188,6 +188,8 @@ def parse_ssid_info_csv(csv_path: Path) -> dict[str, int]:
                 mapped = "VIP"
             elif "customer" in name_lower or "group" in name_lower:
                 mapped = raw_ssid
+            elif "win10" in name_lower:
+                mapped = "Employee-Win10"
             elif "employee" in name_lower:
                 mapped = "Employee"
             elif "guest" in name_lower:

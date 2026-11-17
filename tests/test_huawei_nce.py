@@ -69,6 +69,7 @@ def test_parse_ssid_info_real_format(tmp_path: Path):
         '"CORP-Guest",25\n'
         '"CORP-IoT",10\n'
         '"VIP-Executive",5\n'
+        '"CORP-Employee-Win10",15\n'
     )
     ssid_csv.write_text(content, encoding="utf-8-sig")
 
@@ -77,6 +78,8 @@ def test_parse_ssid_info_real_format(tmp_path: Path):
     assert dist["Guest"] == 25
     assert dist["IoT"] == 10
     assert dist["VIP"] == 5
+    assert dist["Employee-Win10"] == 15
+
 
 
 
@@ -89,6 +92,8 @@ def test_parse_ssid_info_accumulates_across_aps(tmp_path: Path):
         '"CORP-Guest",25\n'
         '"CORP-Guest",15\n'
         '"CORP-IoT",10\n'
+        '"CORP-Employee-Win10",20\n'
+        '"CORP-Employee-Win10",30\n'
     )
     ssid_csv.write_text(content, encoding="utf-8-sig")
 
@@ -96,6 +101,7 @@ def test_parse_ssid_info_accumulates_across_aps(tmp_path: Path):
     assert dist["Employee"] == 150
     assert dist["Guest"] == 40
     assert dist["IoT"] == 10
+    assert dist["Employee-Win10"] == 50
 
 
 def test_collect_huawei_ap_data_no_sibling_and_real_fixture(tmp_path: Path):
