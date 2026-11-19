@@ -66,6 +66,16 @@ def _get_firefox_user_agent() -> str:
     return "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
 
+def _clean_imap_host(host: str) -> str:
+    """Strip URL scheme and trailing slashes so a bare IMAP hostname remains."""
+    host = host.strip()
+    for scheme in ("https://", "http://"):
+        if host.lower().startswith(scheme):
+            host = host[len(scheme) :]
+            break
+    return host.rstrip("/")
+
+
 def _fetch_otp_from_imap(
     imap_host: str,
     imap_port: int,
@@ -193,6 +203,7 @@ def get_otp_from_email(
     Returns:
         6-digit OTP string or None if not found within timeout
     """
+    imap_host = _clean_imap_host(imap_host)
     if not all([imap_host, email, email_password]):
         logger.warning("IMAP credentials incomplete; skipping OTP retrieval")
         return None
@@ -208,7 +219,7 @@ def get_otp_from_email(
     def _try_direct() -> imaplib.IMAP4_SSL | None:
         """Attempt a direct IMAP4_SSL connection."""
         try:
-            return imaplib.IMAP4_SSL(imap_host, imap_port)
+            return imaplib.IMAP4_SSL(imap_host, imap_port, timeout=10)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Direct IMAP connection failed: %s", exc)
             return None
@@ -418,7 +429,7 @@ def _login_cmp(
                 imap_port=imap_port,
                 email=email,
                 email_password=email_password,
-                proxy_server=proxy_server,
+                proxy_server=None,
                 timeout_seconds=otp_timeout_seconds,
                 poll_interval_seconds=otp_poll_interval_seconds,
                 start_time=login_start,

@@ -819,6 +819,15 @@ def test_cmp_monthly_export_setting_and_skip_behavior(monkeypatch, tmp_path, cap
     assert res_on.monthly_file is not None
 
 
+def test_clean_imap_host_strips_scheme_and_slashes():
+    from network_report.collectors.cmp_crawler import _clean_imap_host
+
+    assert _clean_imap_host("https://imap.example.com/") == "imap.example.com"
+    assert _clean_imap_host("http://imap.example.com") == "imap.example.com"
+    assert _clean_imap_host("imap.example.com") == "imap.example.com"
+    assert _clean_imap_host("  imap.example.com/  ") == "imap.example.com"
+
+
 def test_get_otp_from_email_accepts_proxy_server():
     """get_otp_from_email accepts proxy_server parameter (default None)."""
     import inspect
@@ -826,6 +835,89 @@ def test_get_otp_from_email_accepts_proxy_server():
     sig = inspect.signature(get_otp_from_email)
     assert "proxy_server" in sig.parameters
     assert sig.parameters["proxy_server"].default is None
+
+
+def test_get_otp_from_email_direct_uses_timeout_and_clean_host(monkeypatch):
+    """Direct IMAP uses a 10s socket timeout and a scheme-free host."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    calls = []
+
+    def fake_ssl(host, port, **kwargs):
+        calls.append((host, port, kwargs))
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(crawler.imaplib, "IMAP4_SSL", fake_ssl)
+
+    assert (
+        get_otp_from_email(
+            imap_host="https://imap.example.com/",
+            imap_port=993,
+            email="user@example.com",
+            email_password="password",
+            timeout_seconds=1,
+            poll_interval_seconds=0,
+        )
+        is None
+    )
+    assert calls and calls[0] == ("imap.example.com", 993, {"timeout": 10})
+
+
+def test_login_cmp_never_routes_imap_through_proxy(monkeypatch):
+    """_login_cmp asks for OTP with proxy_server=None even when a WARP proxy is set."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    otp_kwargs: dict[str, Any] = {}
+
+    def fake_get_otp(**kwargs):
+        otp_kwargs.update(kwargs)
+        return "123456"
+
+    monkeypatch.setattr(crawler, "get_otp_from_email", fake_get_otp)
+
+    class MockLocator:
+        def click(self, *args, **kwargs):
+            pass
+
+        def count(self):
+            return 1
+
+    class MockPage:
+        def __init__(self):
+            self.token_filled = False
+
+        def goto(self, *args, **kwargs):
+            pass
+
+        def wait_for_selector(self, *args, **kwargs):
+            pass
+
+        def fill(self, selector, value, *args, **kwargs):
+            if selector == "input[id='token']":
+                self.token_filled = value == "123456"
+
+        def locator(self, selector, *args, **kwargs):
+            return MockLocator()
+
+        def click(self, *args, **kwargs):
+            pass
+
+        def wait_for_timeout(self, *args, **kwargs):
+            pass
+
+    page = MockPage()
+    ok = crawler._login_cmp(
+        page,
+        "https://ep.iotcc.telkomsel.com",
+        "user",
+        "pass",
+        timeout=10000,
+        proxy_server="socks5://127.0.0.1:40000",
+    )
+
+    assert ok is True
+    assert otp_kwargs["proxy_server"] is None
+    assert page.token_filled is True
 
 
 def test_get_otp_from_email_socks_unavailable_falls_back(monkeypatch):
