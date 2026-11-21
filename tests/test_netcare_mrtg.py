@@ -496,6 +496,32 @@ def test_gemini_captcha_solver_rotate_on_599():
     assert solver._next_key_index == 1
 
 
+def test_gemini_captcha_solver_accepts_models_as_csv():
+    """models passed as a comma-separated string is split like api_keys."""
+    solver = GeminiCaptchaSolver(api_keys="key1,key2", models="model1, model2,")
+    assert solver.api_keys == ["key1", "key2"]
+    assert solver.models == ["model1", "model2"]
+
+
+def test_load_config_combines_gemini_key_env_vars(monkeypatch):
+    """NETCARE_CAPTCHA_API_KEYS, GEMINI_API_KEYS and GEMINI_API_KEY all contribute keys."""
+    import network_report.config as nr_config
+
+    for name in (
+        "NETCARE_CAPTCHA_API_KEYS",
+        "GEMINI_API_KEYS",
+        "GEMINI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NETCARE_CAPTCHA_API_KEYS", "k1, k2 ,")
+    monkeypatch.setenv("GEMINI_API_KEYS", "k3")
+    monkeypatch.setenv("GEMINI_API_KEY", " k4 ,k5")
+
+    raw = nr_config.load_config().netcare.captcha_api_keys
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
+    assert keys == ["k1", "k2", "k3", "k4", "k5"]
+
+
 def test_rotate_status_includes_599():
     """Test that ROTATE_STATUS includes 599 for network timeout handling."""
     from network_report.collectors.netcare_mrtg import ROTATE_STATUS

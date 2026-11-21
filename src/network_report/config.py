@@ -333,10 +333,14 @@ def load_config() -> AppConfig:
         or (ROOT_DIR / "output" / "raw" / "indibiz" / "traffic.db"),
         sample_interval_seconds=int(os.getenv("ROUTEROS_SAMPLE_INTERVAL_SECONDS", "30")),
     )
-    netcare_api_keys = (
-        os.getenv("NETCARE_CAPTCHA_API_KEYS")
-        or os.getenv("GEMINI_API_KEYS")
-        or os.getenv("GEMINI_API_KEY", "")
+
+    def _split_keys(raw: str) -> list[str]:
+        return [key.strip() for key in raw.split(",") if key.strip()]
+
+    netcare_api_keys = ",".join(
+        _split_keys(os.getenv("NETCARE_CAPTCHA_API_KEYS", ""))
+        + _split_keys(os.getenv("GEMINI_API_KEYS", ""))
+        + _split_keys(os.getenv("GEMINI_API_KEY", ""))
     )
     netcare_models = os.getenv(
         "NETCARE_CAPTCHA_MODELS",

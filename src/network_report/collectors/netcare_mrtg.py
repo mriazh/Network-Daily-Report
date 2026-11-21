@@ -347,7 +347,7 @@ class GeminiCaptchaSolver:
     def __init__(
         self,
         api_keys: list[str] | str,
-        models: list[str],
+        models: list[str] | str,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         proxy: str | None = None,
         transport: callable | None = None,
@@ -357,6 +357,8 @@ class GeminiCaptchaSolver:
             self.api_keys = [k.strip() for k in api_keys.split(",") if k.strip()]
         else:
             self.api_keys = [k.strip() for k in api_keys if k.strip()]
+        if isinstance(models, str):
+            models = models.split(",")
         self.models = [m.strip() for m in models if m.strip()]
         self.timeout_seconds = timeout_seconds
         self._proxy = proxy or os.getenv("NETCARE_CAPTCHA_PROXY") or os.getenv("ALL_PROXY")
