@@ -608,6 +608,166 @@ def test_login_cmp_normalizes_plain_base_url():
     assert navigated_urls[0] == _SERVICE_LOGIN_URL
 
 
+def test_login_cmp_bounded_wait_detects_otp_page():
+    """_login_cmp detects OTP page within 30s bounded wait instead of fixed 4s sleep."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    otp_kwargs: dict[str, Any] = {}
+
+    def fake_get_otp(**kwargs):
+        otp_kwargs.update(kwargs)
+        return "123456"
+
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setattr(crawler, "get_otp_from_email", fake_get_otp)
+
+    class MockLocator:
+        def click(self, *args, **kwargs):
+            pass
+
+        def count(self):
+            return 1
+
+    class MockPage:
+        def __init__(self):
+            self.token_filled = False
+
+        def goto(self, *args, **kwargs):
+            pass
+
+        def wait_for_selector(self, *args, **kwargs):
+            pass
+
+        def fill(self, selector, value, *args, **kwargs):
+            if selector == "input[id='token']":
+                self.token_filled = value == "123456"
+
+        def locator(self, selector, *args, **kwargs):
+            return MockLocator()
+
+        def click(self, *args, **kwargs):
+            pass
+
+        def wait_for_timeout(self, *args, **kwargs):
+            pass
+
+    page = MockPage()
+    ok = crawler._login_cmp(
+        page,
+        "https://ep.iotcc.telkomsel.com",
+        "user",
+        "pass",
+        timeout=10000,
+    )
+
+    assert ok is True
+    assert otp_kwargs.get("start_time") is not None
+    assert page.token_filled is True
+    mp.undo()
+
+
+def test_login_cmp_bounded_wait_detects_dashboard():
+    """_login_cmp detects dashboard without OTP when dashboard selector appears."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    class MockLocator:
+        def __init__(self, selector=""):
+            self.selector = selector
+
+        def click(self, *args, **kwargs):
+            pass
+
+        def count(self):
+            otp_selectors = ["token", "otp", "#token"]
+            dashboard_selectors = [
+                "sparks",
+                "dashboard",
+                "v-menubar",
+                "v-dashboard",
+            ]
+            if any(s in self.selector for s in otp_selectors):
+                return 0
+            if any(s in self.selector for s in dashboard_selectors):
+                return 1
+            return 0
+
+    class MockPage:
+        def goto(self, *args, **kwargs):
+            pass
+
+        def wait_for_selector(self, *args, **kwargs):
+            pass
+
+        def fill(self, *args, **kwargs):
+            pass
+
+        def locator(self, selector, *args, **kwargs):
+            return MockLocator(selector)
+
+        def click(self, *args, **kwargs):
+            pass
+
+        def wait_for_timeout(self, *args, **kwargs):
+            pass
+
+    page = MockPage()
+    ok = crawler._login_cmp(
+        page,
+        "https://ep.iotcc.telkomsel.com",
+        "user",
+        "pass",
+        timeout=10000,
+    )
+
+    assert ok is True
+
+
+def test_login_cmp_bounded_wait_times_out_gracefully(caplog):
+    """_login_cmp warns but returns True when neither OTP nor dashboard appears in 30s."""
+    import logging
+    import network_report.collectors.cmp_crawler as crawler
+
+    class MockLocator:
+        def click(self, *args, **kwargs):
+            pass
+
+        def count(self):
+            return 0
+
+    class MockPage:
+        def goto(self, *args, **kwargs):
+            pass
+
+        def wait_for_selector(self, *args, **kwargs):
+            pass
+
+        def fill(self, *args, **kwargs):
+            pass
+
+        def locator(self, *args, **kwargs):
+            return MockLocator()
+
+        def click(self, *args, **kwargs):
+            pass
+
+        def wait_for_timeout(self, *args, **kwargs):
+            pass
+
+    page = MockPage()
+    with caplog.at_level(logging.WARNING):
+        ok = crawler._login_cmp(
+            page,
+            "https://ep.iotcc.telkomsel.com",
+            "user",
+            "pass",
+            timeout=10000,
+        )
+
+    assert ok is True
+    assert "Neither OTP nor dashboard selector appeared" in caplog.text
+
+
 def test_sort_and_export_with_menubar_fallback():
     from network_report.collectors.cmp_crawler import _sort_and_export
 
@@ -838,7 +998,7 @@ def test_get_otp_from_email_accepts_proxy_server():
 
 
 def test_get_otp_from_email_direct_uses_timeout_and_clean_host(monkeypatch):
-    """Direct IMAP uses a 10s socket timeout and a scheme-free host."""
+    """Direct IMAP uses a 5s socket timeout and a scheme-free host."""
     import network_report.collectors.cmp_crawler as crawler
 
     calls = []
@@ -848,6 +1008,7 @@ def test_get_otp_from_email_direct_uses_timeout_and_clean_host(monkeypatch):
         raise OSError("unreachable")
 
     monkeypatch.setattr(crawler.imaplib, "IMAP4_SSL", fake_ssl)
+    monkeypatch.delenv("CMP_IMAP_FALLBACK_HOSTS", raising=False)
 
     assert (
         get_otp_from_email(
@@ -860,7 +1021,102 @@ def test_get_otp_from_email_direct_uses_timeout_and_clean_host(monkeypatch):
         )
         is None
     )
-    assert calls and calls[0] == ("imap.example.com", 993, {"timeout": 10})
+    assert calls and calls[0] == ("imap.example.com", 993, {"timeout": 5})
+
+
+def test_get_otp_from_email_fallback_hosts_param(monkeypatch):
+    """When fallback_hosts param is given, _try_direct tries each host with 5s timeout."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    calls = []
+
+    def fake_ssl(host, port, **kwargs):
+        calls.append((host, port, kwargs))
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(crawler.imaplib, "IMAP4_SSL", fake_ssl)
+    monkeypatch.delenv("CMP_IMAP_FALLBACK_HOSTS", raising=False)
+
+    assert (
+        get_otp_from_email(
+            imap_host="imap.example.com",
+            imap_port=993,
+            email="user@example.com",
+            email_password="password",
+            timeout_seconds=1,
+            poll_interval_seconds=0,
+            fallback_hosts=["backup.example.com", "imap3.example.com"],
+        )
+        is None
+    )
+    hosts_tried = [c[0] for c in calls]
+    assert "imap.example.com" in hosts_tried
+    assert "backup.example.com" in hosts_tried
+    assert "imap3.example.com" in hosts_tried
+    assert all(c[2] == {"timeout": 5} for c in calls)
+
+
+def test_get_otp_from_email_fallback_hosts_env(monkeypatch):
+    """CMP_IMAP_FALLBACK_HOSTS env var supplies fallback hosts when param is None."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    calls = []
+
+    def fake_ssl(host, port, **kwargs):
+        calls.append((host, port, kwargs))
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(crawler.imaplib, "IMAP4_SSL", fake_ssl)
+    monkeypatch.setenv("CMP_IMAP_FALLBACK_HOSTS", "fallback1.example.com,fallback2.example.com")
+
+    assert (
+        get_otp_from_email(
+            imap_host="imap.example.com",
+            imap_port=993,
+            email="user@example.com",
+            email_password="password",
+            timeout_seconds=1,
+            poll_interval_seconds=0,
+        )
+        is None
+    )
+    hosts_tried = [c[0] for c in calls]
+    assert "imap.example.com" in hosts_tried
+    assert "fallback1.example.com" in hosts_tried
+    assert "fallback2.example.com" in hosts_tried
+    assert all(c[2] == {"timeout": 5} for c in calls)
+
+
+def test_get_otp_from_email_fallback_hosts_deduplicates(monkeypatch):
+    """Duplicate hosts (primary == fallback) are only tried once."""
+    import network_report.collectors.cmp_crawler as crawler
+
+    calls = []
+
+    def fake_ssl(host, port, **kwargs):
+        calls.append((host, port, kwargs))
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(crawler.imaplib, "IMAP4_SSL", fake_ssl)
+    monkeypatch.delenv("CMP_IMAP_FALLBACK_HOSTS", raising=False)
+
+    assert (
+        get_otp_from_email(
+            imap_host="imap.example.com",
+            imap_port=993,
+            email="user@example.com",
+            email_password="password",
+            timeout_seconds=1,
+            poll_interval_seconds=0,
+            fallback_hosts=["imap.example.com", "backup.example.com"],
+        )
+        is None
+    )
+    hosts_tried = [c[0] for c in calls]
+    # Per iteration each host is tried once (loop retries every poll)
+    first_iter = hosts_tried[:2]
+    assert first_iter.count("imap.example.com") == 1
+    assert "backup.example.com" in first_iter
 
 
 def test_login_cmp_never_routes_imap_through_proxy(monkeypatch):

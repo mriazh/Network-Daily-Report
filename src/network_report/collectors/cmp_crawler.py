@@ -179,6 +179,7 @@ def get_otp_from_email(
     timeout_seconds: int = 120,
     poll_interval_seconds: int = 5,
     start_time: float | None = None,
+    fallback_hosts: list[str] | None = None,
 ) -> str | None:
     """
     Connect to IMAP and retrieve the 6-digit OTP from email subject 'CMP - YOUR TOKEN'.
@@ -199,6 +200,10 @@ def get_otp_from_email(
         timeout_seconds: Total time to wait for OTP
         poll_interval_seconds: Time between IMAP polls
         start_time: Epoch timestamp marking login start (freshness cutoff)
+        fallback_hosts: Optional list of fallback IMAP hosts to try when the
+            primary host is unreachable. Falls back to CMP_IMAP_FALLBACK_HOSTS
+            env var (comma-separated) when not provided. Each host gets a 5s
+            socket timeout.
 
     Returns:
         6-digit OTP string or None if not found within timeout
@@ -217,12 +222,27 @@ def get_otp_from_email(
     otp_pattern = re.compile(r"\b(\d{6})\b")
 
     def _try_direct() -> imaplib.IMAP4_SSL | None:
-        """Attempt a direct IMAP4_SSL connection."""
-        try:
-            return imaplib.IMAP4_SSL(imap_host, imap_port, timeout=10)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Direct IMAP connection failed: %s", exc)
-            return None
+        """Attempt a direct IMAP4_SSL connection with fallback hosts."""
+        hosts = [imap_host]
+        if fallback_hosts:
+            hosts.extend(fallback_hosts)
+        else:
+            env_hosts = os.getenv("CMP_IMAP_FALLBACK_HOSTS", "")
+            if env_hosts:
+                hosts.extend(h.strip() for h in env_hosts.split(",") if h.strip())
+        # Deduplicate while preserving order
+        seen = set()
+        unique_hosts = []
+        for h in hosts:
+            if h not in seen:
+                seen.add(h)
+                unique_hosts.append(h)
+        for host in unique_hosts:
+            try:
+                return imaplib.IMAP4_SSL(host, imap_port, timeout=5)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Direct IMAP connection to %s failed: %s", host, exc)
+        return None
 
     def _try_proxy() -> imaplib.IMAP4_SSL | None:
         """Attempt an IMAP4_SSL connection via SOCKS5 proxy."""
@@ -402,11 +422,10 @@ def _login_cmp(
             logger.error("All login submission attempts failed")
             return False
 
-        # Wait for navigation after login - could be OTP page
-        page.wait_for_timeout(4000)
-
-        # Check for OTP/2FA page
-        token_input_selectors = [
+        # Bounded explicit wait for post-login page to render (OTP page or dashboard).
+        # Replaces a static 4s sleep that caused false-positive login success when
+        # portal rendering was slow (>4s).
+        otp_input_selectors = [
             "input[id='token']",
             "#token",
             "input[name='token']",
@@ -414,13 +433,50 @@ def _login_cmp(
             "input[placeholder*='Token' i]",
             "input[placeholder*='OTP' i]",
         ]
-
+        dashboard_selectors = [
+            "div.v-csslayout.v-layout.v-widget.sparks",
+            "div.sparks.v-csslayout-sparks",
+            '[class*="sparks"][class*="v-csslayout"]',
+            ".dashboard-container",
+            ".v-dashboard",
+            "[class*='dashboard']",
+            ".v-menubar",
+        ]
+        post_login_timeout = 30000
         otp_page_detected = False
-        for sel in token_input_selectors:
-            if page.locator(sel).count() > 0:
-                otp_page_detected = True
-                logger.info("OTP page detected, retrieving OTP via IMAP")
+        dashboard_detected = False
+        deadline = time.time() + post_login_timeout / 1000.0
+        while time.time() < deadline:
+            for sel in otp_input_selectors:
+                try:
+                    if page.locator(sel).count() > 0:
+                        otp_page_detected = True
+                        logger.info("OTP page detected, retrieving OTP via IMAP")
+                        break
+                except Exception:
+                    continue
+            if otp_page_detected:
                 break
+            for sel in dashboard_selectors:
+                try:
+                    if page.locator(sel).count() > 0:
+                        dashboard_detected = True
+                        logger.info("Dashboard detected after login; no OTP required")
+                        break
+                except Exception:
+                    continue
+            if dashboard_detected:
+                break
+            page.wait_for_timeout(500)
+
+        if not otp_page_detected and not dashboard_detected:
+            logger.warning(
+                "Neither OTP nor dashboard selector appeared within %dms; "
+                "proceeding with caution",
+                post_login_timeout,
+            )
+
+        # Check for OTP/2FA page
 
         if otp_page_detected:
             # Retrieve OTP from email (with optional SOCKS5 proxy fallback)
@@ -440,7 +496,7 @@ def _login_cmp(
                 return False
 
             # Fill OTP and submit
-            for sel in token_input_selectors:
+            for sel in otp_input_selectors:
                 if page.locator(sel).count() > 0:
                     page.fill(sel, otp)
                     break
