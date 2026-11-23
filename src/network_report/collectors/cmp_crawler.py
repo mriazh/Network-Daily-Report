@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.parse
 from dataclasses import dataclass
+from typing import Any
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -956,63 +957,11 @@ def select_report_type(page: Page, report_type: str, timeout_ms: int = 30000) ->
             "td.gwt-MenuItem[role='listitem'], .gwt-MenuItem, .v-filterselect-suggestmenu span, "
             "div[role='option'], div.v-select-item, span.v-select-item-label, .v-filterselect-suggestpopup span"
         )
-        overlay_options = page.locator(overlay_selector)
         pattern = re.compile(rf"^\s*{re.escape(report_type)}\s*$", re.IGNORECASE)
 
-        target_option = None
-        try:
-            filtered = overlay_options.filter(has_text=pattern)
-            if filtered.count() > 0:
-                target_option = filtered.first
-        except Exception:
-            pass
-
-        if target_option is None:
-            try:
-                total_opts = overlay_options.count()
-                for i in range(total_opts):
-                    opt = overlay_options.nth(i)
-                    try:
-                        if opt.inner_text().strip().lower() == target_lower:
-                            target_option = opt
-                            break
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-        if target_option is None:
-            # Fallback: the option may be a plain element with no known class.
-            # Scope the search to the overlay container so unrelated page text
-            # (for example a "Daily" heading) cannot be clicked by mistake.
-            for scope_selector in (
-                ".v-overlay-container",
-                ".v-filterselect-suggestpopup",
-                "[class*='overlay']",
-            ):
-                scope = page.locator(scope_selector)
-                if scope.count() == 0:
-                    continue
-                try:
-                    exact = scope.get_by_text(re.compile(rf"^\s*{re.escape(report_type)}\s*$"))
-                    if exact.count() > 0:
-                        target_option = exact.first
-                        break
-                    any_text = scope.get_by_text(report_type, exact=False)
-                    if any_text.count() > 0:
-                        target_option = any_text.first
-                        break
-                except Exception:
-                    continue
-
-        if target_option is None:
-            # Last resort: a page-wide exact text match.
-            try:
-                exact = page.get_by_text(re.compile(rf"^\s*{re.escape(report_type)}\s*$"))
-                if exact.count() > 0:
-                    target_option = exact.first
-            except Exception:
-                pass
+        target_option = _find_report_type_option(
+            page, overlay_selector, report_type, target_lower, pattern, retry_ms=250
+        )
 
         if target_option is None:
             logger.warning("Report Type overlay menu item '%s' not found", report_type)
@@ -1031,6 +980,92 @@ def select_report_type(page: Page, report_type: str, timeout_ms: int = 30000) ->
     except Exception as exc:
         logger.warning("select_report_type encountered unexpected error: %s", exc)
         return False
+
+
+def _find_report_type_option(
+    page: Page,
+    overlay_selector: str,
+    report_type: str,
+    target_lower: str,
+    pattern: re.Pattern[str],
+    retry_ms: int = 250,
+    retries: int = 3,
+) -> Any | None:
+    """Locate the overlay option, polling because Vaadin renders it after the popup opens."""
+    try:
+        page.locator(".v-filterselect-suggestpopup").first.wait_for(
+            state="attached", timeout=retry_ms * retries
+        )
+    except Exception:
+        pass
+
+    for attempt in range(max(retries, 1)):
+        # Re-query every attempt: Playwright locators are lazy, but re-resolving
+        # also covers stubs and late-attached overlays that cache a stale result.
+        overlay_options = page.locator(overlay_selector)
+        target_option = _match_report_type_option(overlay_options, report_type, target_lower, pattern)
+        if target_option is not None:
+            return target_option
+        if attempt + 1 < max(retries, 1):
+            time.sleep(retry_ms / 1000)
+    return None
+
+
+def _match_report_type_option(
+    overlay_options: Any,
+    report_type: str,
+    target_lower: str,
+    pattern: re.Pattern[str],
+) -> Any | None:
+    """Single-pass search for the report type option inside the open overlay."""
+    try:
+        filtered = overlay_options.filter(has_text=pattern)
+        if filtered.count() > 0:
+            return filtered.first
+    except Exception:
+        pass
+
+    try:
+        for i in range(overlay_options.count()):
+            opt = overlay_options.nth(i)
+            try:
+                if opt.inner_text().strip().lower() == target_lower:
+                    return opt
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Fallback: the option may be a plain element with no known class.
+    # Scope the search to the overlay container so unrelated page text
+    # (for example a "Daily" heading) cannot be clicked by mistake.
+    for scope_selector in (
+        ".v-overlay-container",
+        ".v-filterselect-suggestpopup",
+        "[class*='overlay']",
+    ):
+        try:
+            scope = page.locator(scope_selector)
+            if scope.count() == 0:
+                continue
+            exact = scope.get_by_text(re.compile(rf"^\s*{re.escape(report_type)}\s*$"))
+            if exact.count() > 0:
+                return exact.first
+            any_text = scope.get_by_text(report_type, exact=False)
+            if any_text.count() > 0:
+                return any_text.first
+        except Exception:
+            continue
+
+    # Last resort: a page-wide exact text match.
+    try:
+        exact = page.get_by_text(re.compile(rf"^\s*{re.escape(report_type)}\s*$"))
+        if exact.count() > 0:
+            return exact.first
+    except Exception:
+        pass
+
+    return None
 
 
 def _fill_query_dates(page: Page, start_date: str, end_date: str, timeout_ms: int = 15000) -> bool:

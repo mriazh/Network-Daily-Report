@@ -284,6 +284,54 @@ def test_select_report_type_overlay_item_missing():
 # 3. Exporter calling select_report_type with Daily and Monthly
 # -----------------------------------------------------------------------------
 
+def test_select_report_type_waits_for_suggestpopup_and_retries_option_search():
+    """Overlay renders late: waits on .v-filterselect-suggestpopup, then retries until the option appears."""
+    btn = FakeLocator()
+    ancestor_div = FakeLocator(sub_locators={"v-filterselect-button": btn})
+    row_container = FakeLocator(text="Report Type:")
+    popup = FakeLocator()
+
+    monthly_input = FakeLocator(
+        value="Monthly",
+        sub_locators={
+            "ancestor::div": ancestor_div,
+            "ancestor::*": row_container,
+        },
+    )
+    filter_inputs = FakeLocator(items=[monthly_input])
+
+    daily_item = FakeLocator(text="Daily")
+    empty_menu = FakeLocator(count=0)
+    ready_menu = FakeLocator(items=[daily_item])
+
+    state = {"searches": 0}
+
+    def custom_locator(selector: str) -> FakeLocator:
+        if "input.v-filterselect-input" in selector:
+            return filter_inputs
+        if "gwt-MenuItem" in selector or "v-select-item" in selector:
+            state["searches"] += 1
+            return ready_menu if state["searches"] > 1 else empty_menu
+        if "v-filterselect-suggestmenu" in selector:
+            return empty_menu
+        if "v-filterselect-suggestpopup" in selector:
+            if "span" in selector:
+                state["searches"] += 1
+                return ready_menu if state["searches"] > 1 else empty_menu
+            return popup
+        if "v-filterselect-button" in selector:
+            return btn
+        return FakeLocator(count=0)
+
+    page = FakePage()
+    page.locator = custom_locator
+
+    assert select_report_type(page, "Daily", timeout_ms=60) is True
+    assert popup.waited_states == ["attached"]
+    assert state["searches"] == 2
+    assert btn.clicks == 1
+    assert daily_item.clicks == 1
+
 
 def test_exporter_calls_select_report_type_daily_and_monthly(monkeypatch):
     """Test that _set_report_type_and_date calls select_report_type with 'Daily' and 'Monthly'."""

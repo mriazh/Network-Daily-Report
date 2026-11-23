@@ -329,9 +329,9 @@ def format_whatsapp_report(payload: dict[str, Any]) -> str:
                 p_text = "Kuota: - (No Active Package)"
             else:
                 if expiry:
-                    p_text = f"Kuota: {total_remaining} GB / {total_quota} GB (Exp: {expiry})"
+                    p_text = f"Kuota: {total_remaining:.2f} GB / {total_quota:.2f} GB (Exp: {expiry})"
                 else:
-                    p_text = f"Kuota: {total_remaining} GB / {total_quota} GB"
+                    p_text = f"Kuota: {total_remaining:.2f} GB / {total_quota:.2f} GB"
             lines.append(f"{idx}. {m.get('location')}: {p_text}")
 
     lines.extend(
