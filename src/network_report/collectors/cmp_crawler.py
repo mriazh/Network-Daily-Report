@@ -1003,7 +1003,7 @@ def _find_report_type_option(
         # Re-query every attempt: Playwright locators are lazy, but re-resolving
         # also covers stubs and late-attached overlays that cache a stale result.
         overlay_options = page.locator(overlay_selector)
-        target_option = _match_report_type_option(overlay_options, report_type, target_lower, pattern)
+        target_option = _match_report_type_option(page, overlay_options, report_type, target_lower, pattern)
         if target_option is not None:
             return target_option
         if attempt + 1 < max(retries, 1):
@@ -1012,6 +1012,7 @@ def _find_report_type_option(
 
 
 def _match_report_type_option(
+    page: Page,
     overlay_options: Any,
     report_type: str,
     target_lower: str,
