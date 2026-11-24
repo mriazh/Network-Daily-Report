@@ -496,6 +496,30 @@ def test_gemini_captcha_solver_rotate_on_599():
     assert solver._next_key_index == 1
 
 
+def test_gemini_captcha_solver_rotate_on_403():
+    """Test that status 403 triggers key rotation in ROTATE_STATUS."""
+    solver = GeminiCaptchaSolver(
+        api_keys=["key1", "key2"],
+        models=["model1", "model2"],
+    )
+    def mock_transport(url: str, payload: dict) -> tuple[int, dict]:
+        if "key1" in url:
+            return 403, {}  # Permission denied - should rotate
+        return 200, {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "abc"}],
+                    }
+                }
+            ]
+        }
+    solver._transport = mock_transport
+    code = solver.solve(b"fake_image_bytes")
+    assert code == "abc"
+    assert solver._next_key_index == 1
+
+
 def test_gemini_captcha_solver_accepts_models_as_csv():
     """models passed as a comma-separated string is split like api_keys."""
     solver = GeminiCaptchaSolver(api_keys="key1,key2", models="model1, model2,")
@@ -526,7 +550,7 @@ def test_rotate_status_includes_599():
     """Test that ROTATE_STATUS includes 599 for network timeout handling."""
     from network_report.collectors.netcare_mrtg import ROTATE_STATUS
     assert 599 in ROTATE_STATUS
-    assert ROTATE_STATUS == frozenset({429, 500, 502, 503, 504, 599})
+    assert ROTATE_STATUS == frozenset({403, 429, 500, 502, 503, 504, 599})
 
 
 def test_default_timeout_seconds_is_45():

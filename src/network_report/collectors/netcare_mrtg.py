@@ -40,7 +40,7 @@ Outbound_Maximum: [value]
 Values should include units (e.g., "6.65 k", "1.82 M", "N/A").
 If a value is not visible or unclear, write "N/A" for that line."""
 
-ROTATE_STATUS = frozenset({429, 500, 502, 503, 504, 599})
+ROTATE_STATUS = frozenset({403, 429, 500, 502, 503, 504, 599})
 MODEL_BLACKLIST_STATUS = frozenset({404, 503})
 DEFAULT_TIMEOUT_SECONDS = 45
 
